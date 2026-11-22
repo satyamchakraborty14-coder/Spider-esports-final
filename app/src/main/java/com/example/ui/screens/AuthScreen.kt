@@ -174,7 +174,7 @@ fun AuthScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Image(
-                        painter = painterResource(id = R.drawable.ic_spider_logo_1795273771866),
+                        painter = painterResource(id = R.drawable.ic_spider_logo),
                         contentDescription = "Spider Esports Logo",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()

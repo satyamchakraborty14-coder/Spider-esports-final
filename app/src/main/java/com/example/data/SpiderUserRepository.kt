@@ -532,6 +532,9 @@ class SpiderUserRepository(
             } else ""
 
             val refCodeUpper = AccountValidationUtil.normalizeReferralCode(referredBy)
+            if (refCodeUpper.isNotBlank() && !AccountValidationUtil.isValidReferralCodeFormat(refCodeUpper)) {
+                throw IllegalArgumentException("Referral code must be 4–24 letters, numbers, hyphens, or underscores.")
+            }
 
             db.runTransaction { tx ->
                 val userRef = db.collection("users").document(uid)

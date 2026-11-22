@@ -53,6 +53,12 @@ fun handleFirestoreError(
     }
 
     val jsonString = errorInfoJson.toString()
-    Log.e("FirestoreError", "Firestore Error: $jsonString")
+    val isClientValidationOnly = rootError !is FirebaseFirestoreException &&
+        (rootError is IllegalArgumentException || rootError is IllegalStateException)
+    if (isClientValidationOnly) {
+        Log.w("FirestoreValidation", "Validation rejected ($operationType $path): ${rootError.message}")
+    } else {
+        Log.e("FirestoreError", "Firestore Error: $jsonString")
+    }
     return jsonString
 }

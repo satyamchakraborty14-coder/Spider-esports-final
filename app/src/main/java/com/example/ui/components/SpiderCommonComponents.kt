@@ -89,7 +89,7 @@ fun presetDrawableForKey(presetKey: String): Int = when (presetKey.lowercase(Loc
     "lone_wolf" -> R.drawable.img_mode_lone_wolf_1795273771948
     "clash_squad" -> R.drawable.img_mode_clash_squad_1795273772044
     "championship" -> R.drawable.img_banner_championship_1795273772511
-    "logo" -> R.drawable.ic_spider_logo_1795273771866
+    "logo" -> R.drawable.ic_spider_logo
     else -> R.drawable.img_mode_battle_royale_1795273772856
 }
 
