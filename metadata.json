@@ -1,0 +1,6 @@
+{
+  "name": "Spider Esports",
+  "description": "Esports tournament platform with dynamic categories, match management, wallet ledger, leaderboards, and admin controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

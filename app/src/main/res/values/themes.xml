@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.SpiderEsports" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/spider_obsidian</item>
+        <item name="android:statusBarColor">@color/spider_obsidian</item>
+        <item name="android:navigationBarColor">@color/spider_obsidian</item>
+    </style>
+</resources>

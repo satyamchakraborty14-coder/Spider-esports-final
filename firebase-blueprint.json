@@ -1,0 +1,510 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated player profile and match statistics.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID" },
+        "username": { "type": "string", "description": "Unique gamer handle" },
+        "displayName": { "type": "string", "description": "Display name" },
+        "email": { "type": "string", "description": "Verified account email" },
+        "photoUrl": { "type": "string", "description": "Avatar URL or data URI" },
+        "playerUid": { "type": "string", "description": "Spider Esports public player ID" },
+        "inGameName": { "type": "string", "description": "In-game character name" },
+        "inGameUid": { "type": "string", "description": "In-game UID" },
+        "phoneNumber": { "type": "string", "description": "Normalized E.164 mobile number" },
+        "phoneVerified": { "type": "boolean" },
+        "emailVerified": { "type": "boolean" },
+        "acceptedTerms": { "type": "boolean" },
+        "onboardingCompleted": { "type": "boolean" },
+        "referralCode": { "type": "string" },
+        "referredBy": { "type": "string" },
+        "language": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "SUSPENDED", "BANNED"] },
+        "matchesPlayed": { "type": "integer" },
+        "wins": { "type": "integer" },
+        "verifiedKills": { "type": "integer" },
+        "rankingPoints": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Set via FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Set via FieldValue.serverTimestamp()" }
+      },
+      "required": ["userId", "username", "displayName", "email", "playerUid", "emailVerified", "referralCode", "status", "matchesPlayed", "wins", "verifiedKills", "rankingPoints", "createdAt", "updatedAt"]
+    },
+    "UsernameClaim": {
+      "title": "UsernameClaim",
+      "description": "Unique lowercase username reservation mapping.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "username", "createdAt"]
+    },
+    "UniqueHashClaim": {
+      "title": "UniqueHashClaim",
+      "description": "Privacy-safe SHA-256 unique reservation mapping for normalized email, mobile number, or Game UID.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "createdAt"]
+    },
+    "ReferralCodeClaim": {
+      "title": "ReferralCodeClaim",
+      "description": "Uppercase referral code lookup index mapped to owner userId.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "referralCode": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "username", "referralCode", "createdAt"]
+    },
+    "ReferralRecord": {
+      "title": "ReferralRecord",
+      "description": "Verified referral attribution and bonus settlement status keyed by referredUid.",
+      "type": "object",
+      "properties": {
+        "referrerUid": { "type": "string" },
+        "referrerUsername": { "type": "string" },
+        "referredUid": { "type": "string" },
+        "referredUsername": { "type": "string" },
+        "referralCode": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "CREDITED", "REJECTED"] },
+        "bonusAmount": { "type": "number" },
+        "transactionId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["referrerUid", "referrerUsername", "referredUid", "referredUsername", "referralCode", "status", "bonusAmount", "transactionId", "createdAt", "updatedAt"]
+    },
+    "TournamentCategory": {
+      "title": "TournamentCategory",
+      "description": "Dynamic admin-managed tournament mode category card.",
+      "type": "object",
+      "properties": {
+        "categoryName": { "type": "string" },
+        "categoryImageUrl": { "type": "string" },
+        "categoryType": { "type": "string", "enum": ["BATTLE_ROYALE", "LONE_WOLF", "CLASH_SQUAD", "ADDITIONAL", "SOLO", "CUSTOM"] },
+        "presetKey": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "randomTournament": { "type": "boolean" },
+        "displayOrder": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["categoryName", "categoryImageUrl", "categoryType", "enabled", "randomTournament", "displayOrder", "createdAt", "updatedAt"]
+    },
+    "CustomTournamentType": {
+      "title": "CustomTournamentType",
+      "description": "Admin-created dynamic Random Tournament format definition.",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string" },
+        "bannerUrl": { "type": "string" },
+        "shortDescription": { "type": "string" },
+        "gameMode": { "type": "string" },
+        "mapName": { "type": "string" },
+        "entryFee": { "type": "number" },
+        "prizePool": { "type": "number" },
+        "perKillReward": { "type": "number" },
+        "maxParticipants": { "type": "integer" },
+        "matchDate": { "type": "string" },
+        "matchTime": { "type": "string" },
+        "registrationDeadline": { "type": "string" },
+        "rules": { "type": "string" },
+        "visibility": { "type": "string", "enum": ["PUBLIC", "HIDDEN"] },
+        "status": { "type": "string", "enum": ["UPCOMING", "LIVE", "COMPLETED", "ARCHIVED"] },
+        "categoryId": { "type": "string" },
+        "displayOrder": { "type": "integer" },
+        "enabled": { "type": "boolean" },
+        "archived": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["displayName", "bannerUrl", "shortDescription", "gameMode", "mapName", "entryFee", "prizePool", "perKillReward", "maxParticipants", "matchDate", "matchTime", "registrationDeadline", "rules", "visibility", "status", "categoryId", "displayOrder", "enabled", "archived", "createdAt", "updatedAt"]
+    },
+    "Tournament": {
+      "title": "Tournament",
+      "description": "Playable tournament event belonging to a category.",
+      "type": "object",
+      "properties": {
+        "categoryId": { "type": "string" },
+        "title": { "type": "string" },
+        "shortDescription": { "type": "string" },
+        "gameMode": { "type": "string" },
+        "mapName": { "type": "string" },
+        "entryFee": { "type": "number" },
+        "prizePool": { "type": "number" },
+        "perKillReward": { "type": "number" },
+        "maxParticipants": { "type": "integer" },
+        "registeredCount": { "type": "integer" },
+        "matchDate": { "type": "string" },
+        "matchTime": { "type": "string" },
+        "registrationDeadline": { "type": "string" },
+        "rules": { "type": "string" },
+        "bannerUrl": { "type": "string" },
+        "presetKey": { "type": "string" },
+        "visibility": { "type": "string", "enum": ["PUBLIC", "HIDDEN"] },
+        "status": { "type": "string", "enum": ["UPCOMING", "LIVE", "FULL", "COMPLETED", "CANCELLED", "ARCHIVED"] },
+        "soloFormat": { "type": "boolean" },
+        "randomTournament": { "type": "boolean" },
+        "roomReleased": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["categoryId", "title", "gameMode", "mapName", "entryFee", "prizePool", "perKillReward", "maxParticipants", "registeredCount", "matchDate", "matchTime", "registrationDeadline", "rules", "visibility", "status", "soloFormat", "randomTournament", "roomReleased", "createdAt", "updatedAt"]
+    },
+    "RoomCredential": {
+      "title": "RoomCredential",
+      "description": "Protected room ID and password accessible only to registered participants or admins.",
+      "type": "object",
+      "properties": {
+        "tournamentId": { "type": "string" },
+        "roomId": { "type": "string" },
+        "roomPassword": { "type": "string" },
+        "released": { "type": "boolean" },
+        "releaseNotice": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["tournamentId", "roomId", "roomPassword", "released", "updatedAt"]
+    },
+    "Registration": {
+      "title": "Registration",
+      "description": "Player tournament registration record.",
+      "type": "object",
+      "properties": {
+        "tournamentId": { "type": "string" },
+        "tournamentTitle": { "type": "string" },
+        "categoryId": { "type": "string" },
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "inGameName": { "type": "string" },
+        "inGameUid": { "type": "string" },
+        "entryFeePaid": { "type": "number" },
+        "status": { "type": "string", "enum": ["CONFIRMED", "CANCELLED", "REFUNDED"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["tournamentId", "tournamentTitle", "categoryId", "userId", "username", "inGameName", "inGameUid", "entryFeePaid", "status", "createdAt", "updatedAt"]
+    },
+    "Team": {
+      "title": "Team",
+      "description": "Duo or squad team roster.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string" },
+        "teamName": { "type": "string" },
+        "gameMode": { "type": "string" },
+        "memberUids": { "type": "string", "description": "JSON-free array not needed; bounded list in rules" },
+        "membersSummary": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "teamName", "gameMode", "membersSummary", "createdAt", "updatedAt"]
+    },
+    "MatchRecord": {
+      "title": "MatchRecord",
+      "description": "Scheduled or active match entry for participant tracking.",
+      "type": "object",
+      "properties": {
+        "tournamentId": { "type": "string" },
+        "title": { "type": "string" },
+        "categoryId": { "type": "string" },
+        "gameMode": { "type": "string" },
+        "mapName": { "type": "string" },
+        "status": { "type": "string", "enum": ["ONGOING", "UPCOMING", "COMPLETED"] },
+        "matchDate": { "type": "string" },
+        "matchTime": { "type": "string" },
+        "roomReleased": { "type": "boolean" },
+        "participantUids": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["tournamentId", "title", "categoryId", "gameMode", "mapName", "status", "matchDate", "matchTime", "roomReleased", "participantUids", "createdAt", "updatedAt"]
+    },
+    "MatchResult": {
+      "title": "MatchResult",
+      "description": "Admin-verified match placement, kills, and rewards.",
+      "type": "object",
+      "properties": {
+        "tournamentId": { "type": "string" },
+        "tournamentTitle": { "type": "string" },
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "placement": { "type": "integer" },
+        "kills": { "type": "integer" },
+        "rewardCoins": { "type": "number" },
+        "verified": { "type": "boolean" },
+        "declaredBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["tournamentId", "tournamentTitle", "userId", "username", "placement", "kills", "rewardCoins", "verified", "declaredBy", "createdAt", "updatedAt"]
+    },
+    "Wallet": {
+      "title": "Wallet",
+      "description": "Server/admin-controlled coin wallet balances.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "totalBalance": { "type": "number" },
+        "depositedBalance": { "type": "number" },
+        "winningBalance": { "type": "number" },
+        "bonusBalance": { "type": "number" },
+        "earningsBalance": { "type": "number" },
+        "payoutsTotal": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "totalBalance", "depositedBalance", "winningBalance", "earningsBalance", "payoutsTotal", "createdAt", "updatedAt"]
+    },
+    "WalletTransaction": {
+      "title": "WalletTransaction",
+      "description": "Immutable wallet transaction ledger item.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "type": { "type": "string", "enum": ["DEPOSIT", "BONUS", "TOURNAMENT_ENTRY", "MATCH_REWARD", "PRIZE", "REFUND", "PAYOUT", "ADMIN_ADJUSTMENT", "REFERRAL_BONUS"] },
+        "direction": { "type": "string", "enum": ["CREDIT", "DEBIT"] },
+        "description": { "type": "string" },
+        "matchId": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["COMPLETED", "PENDING", "FAILED", "REVERSED"] },
+        "resultingBalance": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "type", "direction", "description", "amount", "status", "resultingBalance", "createdAt"]
+    },
+    "PaymentOrder": {
+      "title": "PaymentOrder",
+      "description": "User-submitted or admin-verified deposit request record.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "packageName": { "type": "string" },
+        "coinAmount": { "type": "number" },
+        "rupeeAmount": { "type": "number" },
+        "gateway": { "type": "string" },
+        "referenceId": { "type": "string" },
+        "reviewedBy": { "type": "string" },
+        "status": { "type": "string", "enum": ["DISABLED_PENDING_APPROVAL", "PENDING", "APPROVED", "REJECTED", "VERIFIED", "FAILED"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "packageName", "coinAmount", "gateway", "status", "createdAt", "updatedAt"]
+    },
+    "WalletConfig": {
+      "title": "WalletConfig",
+      "description": "Admin-managed QR code, UPI instructions, and withdrawal rules.",
+      "type": "object",
+      "properties": {
+        "qrImageUrl": { "type": "string" },
+        "upiId": { "type": "string" },
+        "instructions": { "type": "string" },
+        "minWithdraw": { "type": "number" },
+        "coinsPerRupee": { "type": "number" },
+        "winningOnlyRedeem": { "type": "boolean" },
+        "updatedBy": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["qrImageUrl", "upiId", "instructions", "minWithdraw", "coinsPerRupee", "winningOnlyRedeem", "updatedAt"]
+    },
+    "RefundRecord": {
+      "title": "RefundRecord",
+      "description": "Admin-processed tournament refund record.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "tournamentId": { "type": "string" },
+        "amount": { "type": "number" },
+        "reason": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED"] },
+        "processedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "tournamentId", "amount", "reason", "status", "processedBy", "createdAt", "updatedAt"]
+    },
+    "PayoutRequest": {
+      "title": "PayoutRequest",
+      "description": "Winning-only coin redemption payout request (min 50 coins).",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "destinationType": { "type": "string" },
+        "destinationDetails": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED", "PAID"] },
+        "reviewedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "amount", "destinationType", "status", "reviewedBy", "createdAt", "updatedAt"]
+    },
+    "NotificationItem": {
+      "title": "NotificationItem",
+      "description": "User notification entry.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string" },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "message", "type", "read", "createdAt"]
+    },
+    "SupportTicket": {
+      "title": "SupportTicket",
+      "description": "Customer support or complaint ticket.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "category": { "type": "string", "enum": ["PAYMENT", "TOURNAMENT", "ACCOUNT", "GENERAL"] },
+        "subject": { "type": "string" },
+        "description": { "type": "string" },
+        "matchId": { "type": "string" },
+        "status": { "type": "string", "enum": ["OPEN", "IN_REVIEW", "RESOLVED", "CLOSED"] },
+        "adminReply": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "username", "category", "subject", "description", "status", "createdAt", "updatedAt"]
+    },
+    "Dispute": {
+      "title": "Dispute",
+      "description": "Match result dispute raised by a player.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "tournamentId": { "type": "string" },
+        "matchId": { "type": "string" },
+        "reason": { "type": "string" },
+        "status": { "type": "string", "enum": ["OPEN", "REVIEWING", "RESOLVED", "DISMISSED"] },
+        "resolutionNotes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "tournamentId", "matchId", "reason", "status", "createdAt", "updatedAt"]
+    },
+    "PromoBanner": {
+      "title": "PromoBanner",
+      "description": "Admin-managed promotional carousel banner.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "subtitle": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "presetKey": { "type": "string" },
+        "targetAction": { "type": "string", "enum": ["RULES", "SUPPORT", "TOURNAMENTS", "CATEGORY", "RANKING", "NONE"] },
+        "targetId": { "type": "string" },
+        "displayOrder": { "type": "integer" },
+        "enabled": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "subtitle", "imageUrl", "targetAction", "displayOrder", "enabled", "createdAt", "updatedAt"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Admin-managed important updates, rules, and support links.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "category": { "type": "string", "enum": ["IMPORTANT", "RULES", "ALERT", "SUPPORT_CONFIG"] },
+        "telegramUrl": { "type": "string" },
+        "whatsappUrl": { "type": "string" },
+        "priority": { "type": "integer" },
+        "enabled": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "body", "category", "priority", "enabled", "createdAt", "updatedAt"]
+    },
+    "LeaderboardEntry": {
+      "title": "LeaderboardEntry",
+      "description": "Verified player ranking statistics per mode/period.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "mode": { "type": "string", "enum": ["OVERALL", "WEEKLY", "MONTHLY", "SOLO", "DUO", "LONE_WOLF", "CLASH_SQUAD"] },
+        "matches": { "type": "integer" },
+        "wins": { "type": "integer" },
+        "verifiedKills": { "type": "integer" },
+        "rankingPoints": { "type": "integer" },
+        "verified": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "username", "mode", "matches", "wins", "verifiedKills", "rankingPoints", "verified", "updatedAt"]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Authorized administrator registry.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "grantedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "email", "role", "grantedBy", "createdAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable admin action audit trail.",
+      "type": "object",
+      "properties": {
+        "actorId": { "type": "string" },
+        "actorEmail": { "type": "string" },
+        "action": { "type": "string" },
+        "targetCollection": { "type": "string" },
+        "targetId": { "type": "string" },
+        "summary": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["actorId", "actorEmail", "action", "targetCollection", "targetId", "summary", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": { "schema": { "$ref": "#/entities/UserProfile" }, "description": "User profiles" },
+    "/usernames/{usernameLower}": { "schema": { "$ref": "#/entities/UsernameClaim" }, "description": "Unique case-insensitive username index" },
+    "/phoneClaims/{phoneHash}": { "schema": { "$ref": "#/entities/UniqueHashClaim" }, "description": "Unique normalized E.164 mobile number reservation" },
+    "/gameUidClaims/{gameUidHash}": { "schema": { "$ref": "#/entities/UniqueHashClaim" }, "description": "Unique normalized Game UID reservation" },
+    "/emailClaims/{emailHash}": { "schema": { "$ref": "#/entities/UniqueHashClaim" }, "description": "Unique normalized email reservation" },
+    "/referralCodes/{codeUpper}": { "schema": { "$ref": "#/entities/ReferralCodeClaim" }, "description": "Referral code ownership lookup" },
+    "/referrals/{referredUid}": { "schema": { "$ref": "#/entities/ReferralRecord" }, "description": "Referral attribution and bonus status" },
+    "/tournamentCategories/{categoryId}": { "schema": { "$ref": "#/entities/TournamentCategory" }, "description": "Dynamic tournament categories" },
+    "/customTournamentTypes/{typeId}": { "schema": { "$ref": "#/entities/CustomTournamentType" }, "description": "Random Tournament custom types" },
+    "/tournaments/{tournamentId}": { "schema": { "$ref": "#/entities/Tournament" }, "description": "Tournaments" },
+    "/tournaments/{tournamentId}/credentials/{credId}": { "schema": { "$ref": "#/entities/RoomCredential" }, "description": "Room ID and password protected for registered players" },
+    "/registrations/{registrationId}": { "schema": { "$ref": "#/entities/Registration" }, "description": "Tournament registrations" },
+    "/teams/{teamId}": { "schema": { "$ref": "#/entities/Team" }, "description": "Player teams" },
+    "/matches/{matchId}": { "schema": { "$ref": "#/entities/MatchRecord" }, "description": "Player match schedule and status" },
+    "/results/{resultId}": { "schema": { "$ref": "#/entities/MatchResult" }, "description": "Verified match results" },
+    "/wallets/{userId}": { "schema": { "$ref": "#/entities/Wallet" }, "description": "Server-controlled user wallets" },
+    "/transactions/{txId}": { "schema": { "$ref": "#/entities/WalletTransaction" }, "description": "Wallet ledger transactions" },
+    "/payments/{paymentId}": { "schema": { "$ref": "#/entities/PaymentOrder" }, "description": "Payment orders" },
+    "/refunds/{refundId}": { "schema": { "$ref": "#/entities/RefundRecord" }, "description": "Refund records" },
+    "/payoutRequests/{payoutId}": { "schema": { "$ref": "#/entities/PayoutRequest" }, "description": "Redemption payout requests" },
+    "/notifications/{notifId}": { "schema": { "$ref": "#/entities/NotificationItem" }, "description": "Notifications" },
+    "/supportTickets/{ticketId}": { "schema": { "$ref": "#/entities/SupportTicket" }, "description": "Support tickets" },
+    "/disputes/{disputeId}": { "schema": { "$ref": "#/entities/Dispute" }, "description": "Match result disputes" },
+    "/banners/{bannerId}": { "schema": { "$ref": "#/entities/PromoBanner" }, "description": "Promotional banners" },
+    "/announcements/{announcementId}": { "schema": { "$ref": "#/entities/Announcement" }, "description": "Announcements, rules, and support links" },
+    "/leaderboards/{entryId}": { "schema": { "$ref": "#/entities/LeaderboardEntry" }, "description": "Verified leaderboard rankings" },
+    "/adminUsers/{adminUid}": { "schema": { "$ref": "#/entities/AdminUser" }, "description": "Admin role registry" },
+    "/auditLogs/{logId}": { "schema": { "$ref": "#/entities/AuditLog" }, "description": "Immutable audit logs" },
+    "/appConfig/{configId}": { "schema": { "$ref": "#/entities/WalletConfig" }, "description": "Admin wallet QR & redemption configuration" }
+  }
+}
