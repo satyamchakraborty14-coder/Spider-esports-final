@@ -99,7 +99,7 @@ fun RulesScreen(
                                 "1. Zero tolerance for hacks, scripts, teaming, or unauthorized emulators.\n" +
                                     "2. Room ID & Password unlock 5 minutes before match start for registered players only.\n" +
                                     "3. Only verified match results affect rankings and rewards.\n" +
-                                    "4. Paid-entry and real-money payouts remain disabled until all legal and payment approvals are complete.",
+                                    "4. Coin-entry matches deduct the entry fee from your Wallet upon registration; only one account per mobile number is permitted.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = TextSecondary
                             )
@@ -283,8 +283,8 @@ fun SupportScreen(
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Q: When do Room ID & Password appear?", style = MaterialTheme.typography.titleSmall, color = TextPrimary)
                         Text("A: 5 minutes before match start in My Matches (registered players only).", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-                        Text("Q: Why are real-money deposits & payouts locked?", style = MaterialTheme.typography.titleSmall, color = TextPrimary)
-                        Text("A: Paid-entry & payouts require verified payment gateway webhooks and adult operator legal approvals.", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                        Text("Q: How do I join coin tournaments & redeem winnings?", style = MaterialTheme.typography.titleSmall, color = TextPrimary)
+                        Text("A: Add coins in Wallet (or use bonus/winning coins) to join any open coin tournament until slots are full. Winning Prize coins can be withdrawn via UPI (min 50 Coins).", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
                     }
                 }
             }

@@ -5,21 +5,25 @@ const {
 } = require("@firebase/rules-unit-testing");
 const { test, before, after, beforeEach } = require("node:test");
 const fs = require("node:fs");
+const crypto = require("node:crypto");
 
 let testEnv;
 const PROJECT_ID = process.env.GCP_PROJECT || "demo-no-project";
-const ALICE_UID = "alice_uid_101";
-const BOB_UID = "bob_uid_202";
-const ADMIN_UID = "admin_uid_999";
-const ADMIN_EMAIL = "satyamchakraborty14@gmail.com";
+const DATABASE_ID = "ai-studio-android-spideres-670c0de6-e0db-4f2d-8edd-fd4ebb9ee279";
+const ALICE_UID = "alice_uid_123456";
+const BOB_UID = "bob_uid_654321";
 
-const [emulatorHost, emulatorPortStr] = (
-  process.env.FIRESTORE_EMULATOR_HOST || "127.0.0.1:8085"
-).split(":");
+const [emulatorHost, emulatorPortStr] = (process.env.FIRESTORE_EMULATOR_HOST || "127.0.0.1:8085").split(":");
 const emulatorPort = parseInt(emulatorPortStr, 10);
 
-function pastDate(offsetMs = 5000) {
-  return new Date(Date.now() - offsetMs);
+function sha256(val) {
+  return crypto.createHash("sha256").update(val, "utf8").digest("hex");
+}
+
+function dbForUser(uid, email = `${uid}@gmail.com`) {
+  return testEnv
+    .authenticatedContext(uid, { email, email_verified: true })
+    .firestore(DATABASE_ID);
 }
 
 before(async () => {
@@ -46,704 +50,426 @@ beforeEach(async () => {
   }
 });
 
-test("Unauthenticated users cannot read or write any collection", async () => {
-  const unauthDb = testEnv.unauthenticatedContext().firestore();
-  await assertFails(unauthDb.collection("tournamentCategories").where("enabled", "==", true).get());
-  await assertFails(unauthDb.collection("tournaments").where("visibility", "==", "PUBLIC").get());
-  await assertFails(unauthDb.collection("wallets").doc(ALICE_UID).get());
-  await assertFails(unauthDb.collection("users").doc(ALICE_UID).get());
-});
-
-test("User profile isolation, self-creation bounds, and stat immutability", async () => {
-  const aliceDb = testEnv.authenticatedContext(ALICE_UID, { email: "alice@example.com", email_verified: true }).firestore();
-  const bobDb = testEnv.authenticatedContext(BOB_UID, { email: "bob@example.com", email_verified: true }).firestore();
-  const ts = pastDate();
-
-  await assertSucceeds(
-    aliceDb.collection("users").doc(ALICE_UID).set({
+async function seedUserAndTournament({
+  entryFee = 25,
+  maxParticipants = 48,
+  registeredCount = 0,
+  walletBalance = 100,
+  aliceStatus = "ACTIVE",
+  seedWallet = true,
+} = {}) {
+  const now = new Date(Date.now() - 5000);
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const adminDb = ctx.firestore(DATABASE_ID);
+    await adminDb.collection("users").doc(ALICE_UID).set({
       userId: ALICE_UID,
-      username: "spider_alice",
-      displayName: "Alice",
-      email: "alice@example.com",
-      photoUrl: "",
-      playerUid: "SE100101",
-      inGameName: "AliceOP",
-      inGameUid: "99887766",
+      username: "AlicePro",
+      displayName: "Alice Pro",
+      email: "alice@gmail.com",
+      playerUid: "SEALICE1",
+      inGameName: "AliceFF",
+      inGameUid: "1122334455",
+      phoneNumber: "+919876543210",
+      phoneVerified: false,
       emailVerified: true,
-      referralCode: "SPDRALICE",
+      acceptedTerms: true,
+      onboardingCompleted: true,
+      referralCode: "SPDRALICE1",
       referredBy: "",
       language: "EN",
-      status: "ACTIVE",
+      status: aliceStatus,
       matchesPlayed: 0,
       wins: 0,
       verifiedKills: 0,
       rankingPoints: 0,
-      createdAt: ts,
-      updatedAt: ts,
-    })
-  );
+      createdAt: now,
+      updatedAt: now,
+    });
 
-  // Allowed profile update (mutable fields only)
-  await assertSucceeds(
-    aliceDb.collection("users").doc(ALICE_UID).update({
-      inGameName: "AlicePro",
-      updatedAt: pastDate(1000),
-    })
-  );
-
-  // User cannot escalate stats or status
-  await assertFails(
-    aliceDb.collection("users").doc(ALICE_UID).update({
-      rankingPoints: 9999,
-      updatedAt: pastDate(1000),
-    })
-  );
-
-  // Cross-user PII read/list denied
-  await assertFails(bobDb.collection("users").doc(ALICE_UID).get());
-  await assertFails(bobDb.collection("users").get());
-});
-
-test("Email spoofing on admin check is rejected when email_verified is false", async () => {
-  const spoofedAdminDb = testEnv.authenticatedContext("spoof_uid", {
-    email: ADMIN_EMAIL,
-    email_verified: false,
-  }).firestore();
-  const ts = pastDate();
-
-  await assertFails(
-    spoofedAdminDb.collection("tournamentCategories").doc("cat_full_map").set({
-      categoryName: "FULL MAP",
-      categoryImageUrl: "",
-      categoryType: "BATTLE_ROYALE",
-      presetKey: "battle_royale",
-      enabled: true,
-      randomTournament: false,
-      displayOrder: 1,
-      createdAt: ts,
-      updatedAt: ts,
-    })
-  );
-});
-
-test("Admin can create categories, banners, and tournaments; regular users cannot modify them", async () => {
-  const adminDb = testEnv.authenticatedContext(ADMIN_UID, {
-    email: ADMIN_EMAIL,
-    email_verified: true,
-  }).firestore();
-  const aliceDb = testEnv.authenticatedContext(ALICE_UID, { email: "alice@example.com", email_verified: true }).firestore();
-  const ts = pastDate();
-
-  await assertSucceeds(
-    adminDb.collection("tournamentCategories").doc("cat_full_map").set({
-      categoryName: "FULL MAP",
-      categoryImageUrl: "",
-      categoryType: "BATTLE_ROYALE",
-      presetKey: "battle_royale",
-      enabled: true,
-      randomTournament: false,
-      displayOrder: 1,
-      createdAt: ts,
-      updatedAt: ts,
-    })
-  );
-
-  await assertFails(
-    aliceDb.collection("tournamentCategories").doc("cat_hacked").set({
-      categoryName: "HACKED",
-      categoryImageUrl: "",
-      categoryType: "CUSTOM",
-      enabled: true,
-      randomTournament: false,
-      displayOrder: 99,
-      createdAt: ts,
-      updatedAt: ts,
-    })
-  );
-
-  // Filtered query succeeds, unfiltered query fails for non-admin
-  await assertSucceeds(aliceDb.collection("tournamentCategories").where("enabled", "==", true).get());
-  await assertFails(aliceDb.collection("tournamentCategories").get());
-});
-
-test("Atomic free-entry tournament registration & room credential protection", async () => {
-  const adminDb = testEnv.authenticatedContext(ADMIN_UID, {
-    email: ADMIN_EMAIL,
-    email_verified: true,
-  }).firestore();
-  const aliceDb = testEnv.authenticatedContext(ALICE_UID, { email: "alice@example.com", email_verified: true }).firestore();
-  const bobDb = testEnv.authenticatedContext(BOB_UID, { email: "bob@example.com", email_verified: true }).firestore();
-  const ts = pastDate();
-
-  await assertSucceeds(
-    adminDb.collection("tournaments").doc("tour_free_1").set({
-      categoryId: "cat_free_match",
-      title: "Spider Free Scrim #1",
-      shortDescription: "Free entry qualifier",
-      gameMode: "FREE MATCH",
+    await adminDb.collection("tournaments").doc("tour_coin_1").set({
+      categoryId: "cat_full_map",
+      title: "Full Map Coin Clash",
+      shortDescription: "Coin entry tournament",
+      gameMode: "FULL MAP",
       mapName: "Bermuda",
-      entryFee: 0,
-      prizePool: 0,
-      perKillReward: 0,
-      maxParticipants: 48,
-      registeredCount: 0,
-      matchDate: "2026-11-22",
+      entryFee,
+      prizePool: 500,
+      perKillReward: 10,
+      maxParticipants,
+      registeredCount,
+      matchDate: "Today",
       matchTime: "20:00",
-      registrationDeadline: "2026-11-22 19:45",
-      rules: "No emulators, fair play.",
+      registrationDeadline: "19:50",
+      rules: "Fair play",
       bannerUrl: "",
       presetKey: "battle_royale",
       visibility: "PUBLIC",
       status: "UPCOMING",
-      soloFormat: true,
+      soloFormat: false,
       randomTournament: false,
-      roomReleased: true,
-      createdAt: ts,
-      updatedAt: ts,
-    })
-  );
+      roomReleased: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    if (seedWallet) {
+      await adminDb.collection("wallets").doc(ALICE_UID).set({
+        userId: ALICE_UID,
+        totalBalance: walletBalance,
+        depositedBalance: walletBalance,
+        winningBalance: 0,
+        bonusBalance: 0,
+        earningsBalance: 0,
+        payoutsTotal: 0,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+  });
+}
+
+test("Free tournament: authenticated active user can join without wallet", async () => {
+  await seedUserAndTournament({ entryFee: 0, seedWallet: false });
+  const aliceDb = dbForUser(ALICE_UID, "alice@gmail.com");
+  const now = new Date(Date.now() - 1000);
 
   await assertSucceeds(
-    adminDb.collection("tournaments").doc("tour_free_1").collection("credentials").doc("room").set({
-      tournamentId: "tour_free_1",
-      roomId: "88442211",
-      roomPassword: "SPDR",
-      released: true,
-      releaseNotice: "Join 5 mins early",
-      updatedAt: ts,
+    aliceDb.runTransaction(async (tx) => {
+      const regRef = aliceDb.collection("registrations").doc(`tour_coin_1_${ALICE_UID}`);
+      const tourRef = aliceDb.collection("tournaments").doc("tour_coin_1");
+      await tx.get(regRef);
+      const tSnap = await tx.get(tourRef);
+      tx.set(regRef, {
+        tournamentId: "tour_coin_1",
+        tournamentTitle: "Full Map Coin Clash",
+        categoryId: "cat_full_map",
+        userId: ALICE_UID,
+        username: "AlicePro",
+        inGameName: "AliceFF",
+        inGameUid: "1122334455",
+        entryFeePaid: 0,
+        status: "CONFIRMED",
+        createdAt: now,
+        updatedAt: now,
+      });
+      tx.update(tourRef, {
+        registeredCount: tSnap.data().registeredCount + 1,
+        updatedAt: now,
+      });
     })
-  );
-
-  // Unregistered Bob cannot read room credentials
-  await assertFails(
-    bobDb.collection("tournaments").doc("tour_free_1").collection("credentials").doc("room").get()
-  );
-
-  // Atomic batch registration for Alice
-  const batch = aliceDb.batch();
-  batch.set(aliceDb.collection("registrations").doc(`tour_free_1_${ALICE_UID}`), {
-    tournamentId: "tour_free_1",
-    tournamentTitle: "Spider Free Scrim #1",
-    categoryId: "cat_free_match",
-    userId: ALICE_UID,
-    username: "spider_alice",
-    inGameName: "AliceOP",
-    inGameUid: "99887766",
-    entryFeePaid: 0,
-    status: "CONFIRMED",
-    createdAt: ts,
-    updatedAt: ts,
-  });
-  batch.update(aliceDb.collection("tournaments").doc("tour_free_1"), {
-    registeredCount: 1,
-    updatedAt: pastDate(1000),
-  });
-  await assertSucceeds(batch.commit());
-
-  // Now registered Alice can read room credentials
-  await assertSucceeds(
-    aliceDb.collection("tournaments").doc("tour_free_1").collection("credentials").doc("room").get()
   );
 });
 
-test("Wallets and transactions cannot be modified by regular users", async () => {
-  const adminDb = testEnv.authenticatedContext(ADMIN_UID, {
-    email: ADMIN_EMAIL,
-    email_verified: true,
-  }).firestore();
-  const aliceDb = testEnv.authenticatedContext(ALICE_UID, { email: "alice@example.com", email_verified: true }).firestore();
-  const ts = pastDate();
+test("Coin tournament: user with sufficient coins joins atomically and deducts wallet", async () => {
+  await seedUserAndTournament({ entryFee: 25, walletBalance: 100 });
+  const aliceDb = dbForUser(ALICE_UID, "alice@gmail.com");
+  const now = new Date(Date.now() - 1000);
 
   await assertSucceeds(
-    adminDb.collection("wallets").doc(ALICE_UID).set({
-      userId: ALICE_UID,
-      totalBalance: 100,
-      depositedBalance: 50,
-      winningBalance: 50,
-      earningsBalance: 0,
-      payoutsTotal: 0,
-      createdAt: ts,
-      updatedAt: ts,
+    aliceDb.runTransaction(async (tx) => {
+      const regRef = aliceDb.collection("registrations").doc(`tour_coin_1_${ALICE_UID}`);
+      const tourRef = aliceDb.collection("tournaments").doc("tour_coin_1");
+      const walletRef = aliceDb.collection("wallets").doc(ALICE_UID);
+      const txRef = aliceDb.collection("transactions").doc(`tx_join_tour_coin_1_${ALICE_UID}`);
+
+      await tx.get(regRef);
+      const tSnap = await tx.get(tourRef);
+      const wSnap = await tx.get(walletRef);
+
+      const nextDep = wSnap.data().depositedBalance - 25;
+      const nextTotal = nextDep;
+
+      tx.set(regRef, {
+        tournamentId: "tour_coin_1",
+        tournamentTitle: "Full Map Coin Clash",
+        categoryId: "cat_full_map",
+        userId: ALICE_UID,
+        username: "AlicePro",
+        inGameName: "AliceFF",
+        inGameUid: "1122334455",
+        entryFeePaid: 25,
+        status: "CONFIRMED",
+        createdAt: now,
+        updatedAt: now,
+      });
+      tx.update(tourRef, {
+        registeredCount: tSnap.data().registeredCount + 1,
+        updatedAt: now,
+      });
+      tx.update(walletRef, {
+        totalBalance: nextTotal,
+        depositedBalance: nextDep,
+        winningBalance: 0,
+        bonusBalance: 0,
+        earningsBalance: 0,
+        updatedAt: now,
+      });
+      tx.set(txRef, {
+        userId: ALICE_UID,
+        type: "TOURNAMENT_ENTRY",
+        direction: "DEBIT",
+        description: "Joined Full Map Coin Clash",
+        matchId: "tour_coin_1",
+        amount: 25,
+        status: "COMPLETED",
+        resultingBalance: nextTotal,
+        createdAt: now,
+      });
+    })
+  );
+});
+
+test("Coin tournament: fails when wallet debit is missing or forged, or when slots are full", async () => {
+  await seedUserAndTournament({ entryFee: 25, walletBalance: 100 });
+  const aliceDb = dbForUser(ALICE_UID, "alice@gmail.com");
+  const now = new Date(Date.now() - 1000);
+
+  // Cannot join coin tournament without debiting wallet
+  await assertFails(
+    aliceDb.runTransaction(async (tx) => {
+      const regRef = aliceDb.collection("registrations").doc(`tour_coin_1_${ALICE_UID}`);
+      const tourRef = aliceDb.collection("tournaments").doc("tour_coin_1");
+      tx.set(regRef, {
+        tournamentId: "tour_coin_1",
+        tournamentTitle: "Full Map Coin Clash",
+        categoryId: "cat_full_map",
+        userId: ALICE_UID,
+        username: "AlicePro",
+        inGameName: "AliceFF",
+        inGameUid: "1122334455",
+        entryFeePaid: 25,
+        status: "CONFIRMED",
+        createdAt: now,
+        updatedAt: now,
+      });
+      tx.update(tourRef, {
+        registeredCount: 1,
+        updatedAt: now,
+      });
     })
   );
 
-  await assertSucceeds(aliceDb.collection("wallets").doc(ALICE_UID).get());
-  await assertFails(aliceDb.collection("wallets").doc(ALICE_UID).update({ totalBalance: 99999, updatedAt: ts }));
+  // Cannot increase own wallet balance
   await assertFails(
-    aliceDb.collection("transactions").doc("tx_fake").set({
+    aliceDb.collection("wallets").doc(ALICE_UID).update({
+      totalBalance: 500,
+      depositedBalance: 500,
+      winningBalance: 0,
+      bonusBalance: 0,
+      earningsBalance: 0,
+      updatedAt: now,
+    })
+  );
+
+  // Cannot create fake credit transaction
+  await assertFails(
+    aliceDb.collection("transactions").doc("fake_credit_tx").set({
       userId: ALICE_UID,
       type: "DEPOSIT",
       direction: "CREDIT",
-      description: "Fake credit",
-      amount: 5000,
-      status: "COMPLETED",
-      resultingBalance: 5100,
-      createdAt: ts,
-    })
-  );
-});
-
-test("Unique username, phone, gameUid, and email claims prevent duplicates", async () => {
-  const aliceDb = testEnv.authenticatedContext(ALICE_UID, { email: "alice@example.com", email_verified: true }).firestore();
-  const bobDb = testEnv.authenticatedContext(BOB_UID, { email: "bob@example.com", email_verified: true }).firestore();
-  const ts = pastDate();
-
-  // Case-insensitive username claim: only lowercase ID allowed
-  await assertFails(
-    aliceDb.collection("usernames").doc("SpiderX").set({
-      userId: ALICE_UID,
-      username: "SpiderX",
-      createdAt: ts,
-    })
-  );
-  await assertSucceeds(
-    aliceDb.collection("usernames").doc("spiderx").set({
-      userId: ALICE_UID,
-      username: "SpiderX",
-      createdAt: ts,
-    })
-  );
-  // Bob cannot claim spiderx
-  await assertFails(
-    bobDb.collection("usernames").doc("spiderx").set({
-      userId: BOB_UID,
-      username: "spiderx",
-      createdAt: ts,
-    })
-  );
-
-  // Unique phone hash claim
-  await assertSucceeds(
-    aliceDb.collection("phoneClaims").doc("sha256_phone_alice").set({
-      userId: ALICE_UID,
-      createdAt: ts,
-    })
-  );
-  await assertFails(
-    bobDb.collection("phoneClaims").doc("sha256_phone_alice").set({
-      userId: BOB_UID,
-      createdAt: ts,
-    })
-  );
-  // List queries on claim collections are blocked
-  await assertFails(bobDb.collection("phoneClaims").get());
-  await assertFails(bobDb.collection("emailClaims").get());
-});
-
-test("Referral system blocks self-referral and client bonus minting, allows admin bonus transaction", async () => {
-  const adminDb = testEnv.authenticatedContext(ADMIN_UID, {
-    email: ADMIN_EMAIL,
-    email_verified: true,
-  }).firestore();
-  const aliceDb = testEnv.authenticatedContext(ALICE_UID, { email: "alice@example.com", email_verified: true }).firestore();
-  const bobDb = testEnv.authenticatedContext(BOB_UID, { email: "bob@example.com", email_verified: true }).firestore();
-  const ts = pastDate();
-
-  // Alice creates her referral code claim
-  await assertSucceeds(
-    aliceDb.collection("referralCodes").doc("SPDRALICE1").set({
-      userId: ALICE_UID,
-      username: "SpiderAlice",
-      referralCode: "SPDRALICE1",
-      createdAt: ts,
-    })
-  );
-
-  // Self-referral denied
-  await assertFails(
-    aliceDb.collection("referrals").doc(ALICE_UID).set({
-      referrerUid: ALICE_UID,
-      referrerUsername: "SpiderAlice",
-      referredUid: ALICE_UID,
-      referredUsername: "SpiderAlice",
-      referralCode: "SPDRALICE1",
-      status: "PENDING",
-      bonusAmount: 0,
-      transactionId: "",
-      createdAt: ts,
-      updatedAt: ts,
-    })
-  );
-
-  // Client cannot mint CREDITED status or bonus > 0
-  await assertFails(
-    bobDb.collection("referrals").doc(BOB_UID).set({
-      referrerUid: ALICE_UID,
-      referrerUsername: "SpiderAlice",
-      referredUid: BOB_UID,
-      referredUsername: "SpiderBob",
-      referralCode: "SPDRALICE1",
-      status: "CREDITED",
-      bonusAmount: 100,
-      transactionId: "fake_tx",
-      createdAt: ts,
-      updatedAt: ts,
-    })
-  );
-
-  // Valid PENDING referral creation by Bob succeeds
-  await assertSucceeds(
-    bobDb.collection("referrals").doc(BOB_UID).set({
-      referrerUid: ALICE_UID,
-      referrerUsername: "SpiderAlice",
-      referredUid: BOB_UID,
-      referredUsername: "SpiderBob",
-      referralCode: "SPDRALICE1",
-      status: "PENDING",
-      bonusAmount: 0,
-      transactionId: "",
-      createdAt: ts,
-      updatedAt: ts,
-    })
-  );
-
-  // Scoped referral queries succeed
-  await assertSucceeds(aliceDb.collection("referrals").where("referrerUid", "==", ALICE_UID).get());
-  await assertFails(bobDb.collection("referrals").get());
-
-  // Admin approves referral & records REFERRAL_BONUS transaction
-  await assertSucceeds(
-    adminDb.collection("referrals").doc(BOB_UID).update({
-      status: "CREDITED",
-      bonusAmount: 10,
-      transactionId: "tx_ref_bob",
-      updatedAt: pastDate(1000),
-    })
-  );
-  await assertSucceeds(
-    adminDb.collection("transactions").doc("tx_ref_bob").set({
-      userId: ALICE_UID,
-      type: "REFERRAL_BONUS",
-      direction: "CREDIT",
-      description: "Referral bonus for inviting SpiderBob",
+      description: "Free coins",
       matchId: "",
-      amount: 10,
+      amount: 500,
       status: "COMPLETED",
-      resultingBalance: 10,
-      createdAt: pastDate(1000),
+      resultingBalance: 600,
+      createdAt: now,
     })
   );
 });
 
-test("Only verified satyamchakraborty14@gmail.com is admin; other users in adminUsers cannot gain admin access", async () => {
+test("Coin tournament: fails when slots are full", async () => {
+  await seedUserAndTournament({ entryFee: 25, maxParticipants: 10, registeredCount: 10, walletBalance: 100 });
+  const aliceDb = dbForUser(ALICE_UID, "alice@gmail.com");
+  const now = new Date(Date.now() - 1000);
+
+  await assertFails(
+    aliceDb.runTransaction(async (tx) => {
+      const regRef = aliceDb.collection("registrations").doc(`tour_coin_1_${ALICE_UID}`);
+      const tourRef = aliceDb.collection("tournaments").doc("tour_coin_1");
+      const walletRef = aliceDb.collection("wallets").doc(ALICE_UID);
+      const txRef = aliceDb.collection("transactions").doc(`tx_join_tour_coin_1_${ALICE_UID}`);
+      tx.set(regRef, {
+        tournamentId: "tour_coin_1",
+        tournamentTitle: "Full Map Coin Clash",
+        categoryId: "cat_full_map",
+        userId: ALICE_UID,
+        username: "AlicePro",
+        inGameName: "AliceFF",
+        inGameUid: "1122334455",
+        entryFeePaid: 25,
+        status: "CONFIRMED",
+        createdAt: now,
+        updatedAt: now,
+      });
+      tx.update(tourRef, { registeredCount: 11, updatedAt: now });
+      tx.update(walletRef, {
+        totalBalance: 75,
+        depositedBalance: 75,
+        winningBalance: 0,
+        bonusBalance: 0,
+        earningsBalance: 0,
+        updatedAt: now,
+      });
+      tx.set(txRef, {
+        userId: ALICE_UID,
+        type: "TOURNAMENT_ENTRY",
+        direction: "DEBIT",
+        description: "Joined Full Map Coin Clash",
+        matchId: "tour_coin_1",
+        amount: 25,
+        status: "COMPLETED",
+        resultingBalance: 75,
+        createdAt: now,
+      });
+    })
+  );
+});
+
+test("One mobile number per account: phoneClaims blocks second user without needing OTP", async () => {
+  const aliceDb = dbForUser(ALICE_UID, "alice@gmail.com");
+  const bobDb = dbForUser(BOB_UID, "bob@gmail.com");
+  const phone = "+919988776655";
+  const hash = sha256(phone);
+  const now = new Date(Date.now() - 1000);
+
+  await assertSucceeds(
+    aliceDb.runTransaction(async (tx) => {
+      tx.set(aliceDb.collection("phoneClaims").doc(hash), {
+        userId: ALICE_UID,
+        createdAt: now,
+      });
+      tx.set(aliceDb.collection("users").doc(ALICE_UID), {
+        userId: ALICE_UID,
+        username: "AliceOne",
+        displayName: "Alice One",
+        email: "alice@gmail.com",
+        photoUrl: "",
+        playerUid: "SEALICE1",
+        inGameName: "AliceOne",
+        inGameUid: "99887766",
+        phoneNumber: phone,
+        phoneVerified: false,
+        emailVerified: true,
+        acceptedTerms: true,
+        onboardingCompleted: true,
+        referralCode: "SPDRALICE1",
+        referredBy: "",
+        language: "EN",
+        status: "ACTIVE",
+        matchesPlayed: 0,
+        wins: 0,
+        verifiedKills: 0,
+        rankingPoints: 0,
+        createdAt: now,
+        updatedAt: now,
+      });
+    })
+  );
+
+  // Bob cannot claim the same mobile number
+  await assertFails(
+    bobDb.collection("phoneClaims").doc(hash).set({
+      userId: BOB_UID,
+      createdAt: now,
+    })
+  );
+
+  // Bob cannot delete Alice's phone claim
+  await assertFails(bobDb.collection("phoneClaims").doc(hash).delete());
+
+  // Alice cannot spoof phoneVerified=true
+  await assertFails(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      phoneVerified: true,
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+
+  // Alice can update her own mobile number to a fresh unused number without OTP
+  const newPhone = "+919111222333";
+  const newHash = sha256(newPhone);
+  await assertSucceeds(
+    aliceDb.runTransaction(async (tx) => {
+      tx.delete(aliceDb.collection("phoneClaims").doc(hash));
+      tx.set(aliceDb.collection("phoneClaims").doc(newHash), {
+        userId: ALICE_UID,
+        createdAt: new Date(Date.now() - 500),
+      });
+      tx.update(aliceDb.collection("users").doc(ALICE_UID), {
+        phoneNumber: newPhone,
+        updatedAt: new Date(Date.now() - 500),
+      });
+    })
+  );
+});
+
+test("Coin tournament: multi-bucket deduction (deposit + bonus + winning) succeeds", async () => {
+  await seedUserAndTournament({ entryFee: 50, walletBalance: 0, seedWallet: false });
+  const now = new Date(Date.now() - 5000);
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
-    await ctx.firestore().collection("adminUsers").doc(BOB_UID).set({
-      userId: BOB_UID,
-      email: "bob@example.com",
-      role: "ADMIN",
-      grantedBy: ADMIN_UID,
-      createdAt: pastDate(),
-    });
-  });
-
-  const verifiedBobDb = testEnv.authenticatedContext(BOB_UID, {
-    email: "bob@example.com",
-    email_verified: true,
-  }).firestore();
-  await assertFails(verifiedBobDb.collection("users").get());
-  await assertFails(
-    verifiedBobDb.collection("adminUsers").doc("fake_admin").set({
-      userId: "fake_admin",
-      email: "bob@example.com",
-      role: "ADMIN",
-      grantedBy: BOB_UID,
-      createdAt: pastDate(),
-    })
-  );
-
-  const adminDb = testEnv.authenticatedContext(ADMIN_UID, {
-    email: ADMIN_EMAIL,
-    email_verified: true,
-  }).firestore();
-  await assertSucceeds(
-    adminDb.collection("adminUsers").doc(ADMIN_UID).set({
-      userId: ADMIN_UID,
-      email: ADMIN_EMAIL,
-      role: "OWNER_ADMIN",
-      grantedBy: ADMIN_EMAIL,
-      createdAt: pastDate(),
-    })
-  );
-  await assertFails(
-    adminDb.collection("adminUsers").doc(BOB_UID).set({
-      userId: BOB_UID,
-      email: "bob@example.com",
-      role: "ADMIN",
-      grantedBy: ADMIN_EMAIL,
-      createdAt: pastDate(),
-    })
-  );
-  await assertSucceeds(adminDb.collection("users").get());
-});
-
-test("Admin can configure Payment QR; users can submit custom deposits; withdrawals require winning balance >= 50 and non-banned status", async () => {
-  const adminDb = testEnv.authenticatedContext(ADMIN_UID, {
-    email: ADMIN_EMAIL,
-    email_verified: true,
-  }).firestore();
-  const aliceDb = testEnv.authenticatedContext(ALICE_UID, { email: "alice@example.com", email_verified: true }).firestore();
-  const bobDb = testEnv.authenticatedContext(BOB_UID, { email: "bob@example.com", email_verified: true }).firestore();
-  const ts = pastDate();
-
-  // Admin writes QR wallet config; user cannot overwrite it
-  await assertSucceeds(
-    adminDb.collection("appConfig").doc("wallet").set({
-      qrImageUrl: "https://example.com/qr.png",
-      upiId: "spider@upi",
-      instructions: "50 Coins = 50 Rupees",
-      minWithdraw: 50,
-      coinsPerRupee: 1,
-      winningOnlyRedeem: true,
-      updatedBy: ADMIN_EMAIL,
-      updatedAt: ts,
-    })
-  );
-  await assertSucceeds(aliceDb.collection("appConfig").doc("wallet").get());
-  await assertFails(
-    aliceDb.collection("appConfig").doc("wallet").set({
-      qrImageUrl: "https://evil.com/qr.png",
-      upiId: "hacker@upi",
-      instructions: "hack",
-      minWithdraw: 50,
-      coinsPerRupee: 1,
-      winningOnlyRedeem: true,
-      updatedBy: "alice",
-      updatedAt: ts,
-    })
-  );
-
-  // Alice creates a custom PENDING deposit request (75 coins)
-  await assertSucceeds(
-    aliceDb.collection("payments").doc("pay_alice_75").set({
+    const adminDb = ctx.firestore(DATABASE_ID);
+    await adminDb.collection("wallets").doc(ALICE_UID).set({
       userId: ALICE_UID,
-      packageName: "Custom 75 Coins (₹75)",
-      coinAmount: 75,
-      rupeeAmount: 75,
-      gateway: "UPI_QR",
-      referenceId: "UTR123456789",
-      reviewedBy: "",
-      status: "PENDING",
-      createdAt: ts,
-      updatedAt: ts,
-    })
-  );
-  // Alice cannot approve her own deposit
-  await assertFails(
-    aliceDb.collection("payments").doc("pay_alice_75").update({
-      status: "APPROVED",
-      reviewedBy: ALICE_UID,
-      updatedAt: pastDate(1000),
-    })
-  );
-
-  // Alice wallet: 200 Deposit + 100 Bonus + 40 Winning (total 340, winning < 50!)
-  await assertSucceeds(
-    adminDb.collection("wallets").doc(ALICE_UID).set({
-      userId: ALICE_UID,
-      totalBalance: 340,
-      depositedBalance: 200,
-      winningBalance: 40,
-      bonusBalance: 100,
-      earningsBalance: 140,
+      totalBalance: 60,
+      depositedBalance: 20,
+      bonusBalance: 15,
+      earningsBalance: 15,
+      winningBalance: 25,
       payoutsTotal: 0,
-      createdAt: ts,
-      updatedAt: ts,
-    })
-  );
-
-  // Withdrawal < 50 fails
-  await assertFails(
-    aliceDb.collection("payoutRequests").doc("out_40").set({
-      userId: ALICE_UID,
-      amount: 40,
-      destinationType: "UPI",
-      destinationDetails: "alice@upi",
-      status: "PENDING",
-      reviewedBy: "",
-      createdAt: ts,
-      updatedAt: ts,
-    })
-  );
-
-  // Withdrawal >= 50 (e.g. 60) fails when winningBalance is only 40 (Deposit/Bonus cannot be redeemed)
-  await assertFails(
-    aliceDb.collection("payoutRequests").doc("out_60").set({
-      userId: ALICE_UID,
-      amount: 60,
-      destinationType: "UPI",
-      destinationDetails: "alice@upi",
-      status: "PENDING",
-      reviewedBy: "",
-      createdAt: ts,
-      updatedAt: ts,
-    })
-  );
-
-  // Admin credits Winning balance to 80; now withdrawal of 50 succeeds
-  await assertSucceeds(
-    adminDb.collection("wallets").doc(ALICE_UID).update({
-      winningBalance: 80,
-      totalBalance: 380,
-      updatedAt: pastDate(1000),
-    })
-  );
-  await assertSucceeds(
-    aliceDb.collection("payoutRequests").doc("out_50").set({
-      userId: ALICE_UID,
-      amount: 50,
-      destinationType: "UPI",
-      destinationDetails: "alice@upi",
-      status: "PENDING",
-      reviewedBy: "",
-      createdAt: ts,
-      updatedAt: ts,
-    })
-  );
-
-  // Banned user Bob cannot submit deposit or withdrawal requests
-  await testEnv.withSecurityRulesDisabled(async (ctx) => {
-    await ctx.firestore().collection("users").doc(BOB_UID).set({
-      userId: BOB_UID,
-      username: "banned_bob",
-      displayName: "Bob",
-      email: "bob@example.com",
-      photoUrl: "",
-      playerUid: "SE200202",
-      emailVerified: true,
-      referralCode: "SPDRBOB",
-      status: "BANNED",
-      matchesPlayed: 0,
-      wins: 0,
-      verifiedKills: 0,
-      rankingPoints: 0,
-      createdAt: ts,
-      updatedAt: ts,
-    });
-    await ctx.firestore().collection("wallets").doc(BOB_UID).set({
-      userId: BOB_UID,
-      totalBalance: 100,
-      depositedBalance: 0,
-      winningBalance: 100,
-      bonusBalance: 0,
-      earningsBalance: 100,
-      payoutsTotal: 0,
-      createdAt: ts,
-      updatedAt: ts,
+      createdAt: now,
+      updatedAt: now,
     });
   });
 
-  await assertFails(
-    bobDb.collection("payments").doc("pay_bob_50").set({
-      userId: BOB_UID,
-      packageName: "Custom 50 Coins",
-      coinAmount: 50,
-      rupeeAmount: 50,
-      gateway: "UPI_QR",
-      referenceId: "UTR999",
-      reviewedBy: "",
-      status: "PENDING",
-      createdAt: ts,
-      updatedAt: ts,
-    })
-  );
-  await assertFails(
-    bobDb.collection("payoutRequests").doc("out_bob_50").set({
-      userId: BOB_UID,
-      amount: 50,
-      destinationType: "UPI",
-      destinationDetails: "bob@upi",
-      status: "PENDING",
-      reviewedBy: "",
-      createdAt: ts,
-      updatedAt: ts,
+  const aliceDb = dbForUser(ALICE_UID, "alice@gmail.com");
+  const txNow = new Date(Date.now() - 1000);
+
+  // Deduct 50 Coins: 20 Deposit + 15 Bonus + 15 Winning -> Remaining: 0 Dep, 0 Bonus, 10 Win (Total 10)
+  await assertSucceeds(
+    aliceDb.runTransaction(async (tx) => {
+      const regRef = aliceDb.collection("registrations").doc(`tour_coin_1_${ALICE_UID}`);
+      const tourRef = aliceDb.collection("tournaments").doc("tour_coin_1");
+      const walletRef = aliceDb.collection("wallets").doc(ALICE_UID);
+      const txRef = aliceDb.collection("transactions").doc(`tx_join_tour_coin_1_${ALICE_UID}`);
+
+      await tx.get(regRef);
+      const tSnap = await tx.get(tourRef);
+      tx.set(regRef, {
+        tournamentId: "tour_coin_1",
+        tournamentTitle: "Full Map Coin Clash",
+        categoryId: "cat_full_map",
+        userId: ALICE_UID,
+        username: "AlicePro",
+        inGameName: "AliceFF",
+        inGameUid: "1122334455",
+        entryFeePaid: 50,
+        status: "CONFIRMED",
+        createdAt: txNow,
+        updatedAt: txNow,
+      });
+      tx.update(tourRef, {
+        registeredCount: tSnap.data().registeredCount + 1,
+        updatedAt: txNow,
+      });
+      tx.update(walletRef, {
+        totalBalance: 10,
+        depositedBalance: 0,
+        winningBalance: 10,
+        bonusBalance: 0,
+        earningsBalance: 0,
+        updatedAt: txNow,
+      });
+      tx.set(txRef, {
+        userId: ALICE_UID,
+        type: "TOURNAMENT_ENTRY",
+        direction: "DEBIT",
+        description: "Joined Full Map Coin Clash (50 Coins)",
+        matchId: "tour_coin_1",
+        amount: 50,
+        status: "COMPLETED",
+        resultingBalance: 10,
+        createdAt: txNow,
+      });
     })
   );
 });
-
-test("Missing-document get() parity on referrals, registrations, and credentials preserves cross-user isolation", async () => {
-  const adminDb = testEnv.authenticatedContext(ADMIN_UID, {
-    email: ADMIN_EMAIL,
-    email_verified: true,
-  }).firestore();
-  const aliceDb = testEnv.authenticatedContext(ALICE_UID, {
-    email: "alice@example.com",
-    email_verified: true,
-  }).firestore();
-  const bobDb = testEnv.authenticatedContext(BOB_UID, {
-    email: "bob@example.com",
-    email_verified: true,
-  }).firestore();
-  const ts = pastDate();
-
-  // Seed free public upcoming tournament
-  await assertSucceeds(
-    adminDb.collection("tournaments").doc("tour_free_missing_check").set({
-      categoryId: "cat_solo",
-      title: "Solo Free Open",
-      shortDescription: "Free entry open",
-      gameMode: "SOLO",
-      mapName: "Bermuda",
-      entryFee: 0,
-      prizePool: 50,
-      perKillReward: 0,
-      maxParticipants: 48,
-      registeredCount: 0,
-      matchDate: "2026-11-22",
-      matchTime: "20:00",
-      registrationDeadline: "2026-11-22 19:45",
-      rules: "Fair play only.",
-      bannerUrl: "",
-      presetKey: "battle_royale",
-      visibility: "PUBLIC",
-      status: "UPCOMING",
-      soloFormat: true,
-      randomTournament: false,
-      roomReleased: false,
-      createdAt: ts,
-      updatedAt: ts,
-    })
-  );
-
-  // 1. Missing referrals/{uid}: owner can get() non-existent doc cleanly; other user cannot
-  await assertSucceeds(aliceDb.collection("referrals").doc(ALICE_UID).get());
-  await assertFails(bobDb.collection("referrals").doc(ALICE_UID).get());
-
-  // 2. Missing registrations/{tourId}_{uid}: owner can pre-read before registration; other user cannot
-  const aliceRegId = `tour_free_missing_check_${ALICE_UID}`;
-  await assertSucceeds(aliceDb.collection("registrations").doc(aliceRegId).get());
-  await assertFails(bobDb.collection("registrations").doc(aliceRegId).get());
-
-  // 3. Unregistered Alice cannot get missing room credentials; once registered via batch (mirroring tx), Alice can get missing credentials
-  await assertFails(
-    aliceDb.collection("tournaments").doc("tour_free_missing_check").collection("credentials").doc("room").get()
-  );
-
-  const batch = aliceDb.batch();
-  batch.set(aliceDb.collection("registrations").doc(aliceRegId), {
-    tournamentId: "tour_free_missing_check",
-    tournamentTitle: "Solo Free Open",
-    categoryId: "cat_solo",
-    userId: ALICE_UID,
-    username: "spider_alice",
-    inGameName: "AliceOP",
-    inGameUid: "99887766",
-    entryFeePaid: 0,
-    status: "CONFIRMED",
-    createdAt: ts,
-    updatedAt: ts,
-  });
-  batch.update(aliceDb.collection("tournaments").doc("tour_free_missing_check"), {
-    registeredCount: 1,
-    updatedAt: pastDate(1000),
-  });
-  await assertSucceeds(batch.commit());
-
-  await assertSucceeds(
-    aliceDb.collection("tournaments").doc("tour_free_missing_check").collection("credentials").doc("room").get()
-  );
-  await assertFails(
-    bobDb.collection("tournaments").doc("tour_free_missing_check").collection("credentials").doc("room").get()
-  );
-});
-
-

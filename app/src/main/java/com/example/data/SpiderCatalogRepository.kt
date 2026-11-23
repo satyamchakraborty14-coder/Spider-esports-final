@@ -127,7 +127,9 @@ class SpiderCatalogRepository(
         }
     }
 
-    suspend fun registerForFreeTournament(
+    private fun roundCoins(value: Double): Double = kotlin.math.round(value * 100.0) / 100.0
+
+    suspend fun registerForTournament(
         tournament: Tournament,
         username: String,
         inGameName: String,
@@ -141,10 +143,8 @@ class SpiderCatalogRepository(
         val regId = "${tournament.id}_$uid"
         val regPath = "registrations/$regId"
         return try {
-            if (tournament.entryFee > 0.0) {
-                return Result.failure(
-                    IllegalStateException("Paid-entry tournaments remain disabled until legal, age, and payment gateway approvals are completed.")
-                )
+            if (tournament.visibility != "PUBLIC") {
+                return Result.failure(IllegalStateException("Tournament is not open for registration."))
             }
             if (tournament.status !in listOf("UPCOMING", "LIVE")) {
                 return Result.failure(IllegalStateException("Tournament registration is closed."))
@@ -158,38 +158,111 @@ class SpiderCatalogRepository(
 
             val regRef = db.collection("registrations").document(regId)
             val tourRef = db.collection("tournaments").document(tournament.id)
+            val walletRef = db.collection("wallets").document(uid)
+            val txRef = db.collection("transactions").document("tx_join_${tournament.id}_$uid")
+
             db.runTransaction { tx ->
+                // All reads MUST precede all writes in Firestore transactions
                 val existingReg = tx.get(regRef)
                 val tourSnap = tx.get(tourRef)
+                val walletSnap = tx.get(walletRef)
+
                 if (existingReg.exists()) {
                     throw IllegalStateException("You are already registered for this match.")
                 }
-                val liveStatus = tourSnap.getString("status") ?: tournament.status
-                val liveFee = tourSnap.getDouble("entryFee") ?: tournament.entryFee
-                if (liveFee > 0.0) {
-                    throw IllegalStateException("Paid-entry tournaments remain disabled until legal, age, and payment gateway approvals are completed.")
+                if (!tourSnap.exists()) {
+                    throw IllegalStateException("Tournament no longer exists.")
                 }
+                val liveVisibility = tourSnap.getString("visibility") ?: tournament.visibility
+                if (liveVisibility != "PUBLIC") {
+                    throw IllegalStateException("Tournament is not open for registration.")
+                }
+                val liveStatus = tourSnap.getString("status") ?: tournament.status
                 if (liveStatus !in listOf("UPCOMING", "LIVE")) {
                     throw IllegalStateException("Tournament registration is closed.")
                 }
                 val liveCount = tourSnap.getLong("registeredCount") ?: 0L
                 val maxCap = tourSnap.getLong("maxParticipants") ?: tournament.maxParticipants
                 if (liveCount >= maxCap) {
-                    throw IllegalStateException("Tournament just filled up.")
+                    throw IllegalStateException("Tournament slots are full.")
                 }
 
+                val liveFee = roundCoins((tourSnap.getDouble("entryFee") ?: tournament.entryFee).coerceAtLeast(0.0))
+                val liveTitle = (tourSnap.getString("title") ?: tournament.title).take(80)
                 val now = FieldValue.serverTimestamp()
+
+                if (liveFee > 0.0) {
+                    if (!walletSnap.exists()) {
+                        throw IllegalStateException("Insufficient coins (0 Coins available, ${liveFee.toInt()} Coins required). Add coins in Wallet to join.")
+                    }
+                    val currentDep = (walletSnap.getDouble("depositedBalance") ?: 0.0).coerceAtLeast(0.0)
+                    val currentWin = (walletSnap.getDouble("winningBalance") ?: 0.0).coerceAtLeast(0.0)
+                    val currentBonus = (
+                        if (walletSnap.contains("bonusBalance")) {
+                            walletSnap.getDouble("bonusBalance") ?: 0.0
+                        } else {
+                            walletSnap.getDouble("earningsBalance") ?: 0.0
+                        }
+                    ).coerceAtLeast(0.0)
+                    val currentTotal = roundCoins(currentDep + currentWin + currentBonus)
+                    if (currentTotal + 0.001 < liveFee) {
+                        throw IllegalStateException(
+                            "Insufficient coins (${currentTotal.toInt()} Coins available, ${liveFee.toInt()} Coins required). Add coins in Wallet to join."
+                        )
+                    }
+
+                    var remaining = liveFee
+                    val depUsed = minOf(currentDep, remaining)
+                    val nextDep = roundCoins((currentDep - depUsed).coerceAtLeast(0.0))
+                    remaining = roundCoins((remaining - depUsed).coerceAtLeast(0.0))
+
+                    val bonusUsed = minOf(currentBonus, remaining)
+                    val nextBonus = roundCoins((currentBonus - bonusUsed).coerceAtLeast(0.0))
+                    remaining = roundCoins((remaining - bonusUsed).coerceAtLeast(0.0))
+
+                    val winUsed = minOf(currentWin, remaining)
+                    val nextWin = roundCoins((currentWin - winUsed).coerceAtLeast(0.0))
+
+                    val nextTotal = roundCoins(nextDep + nextWin + nextBonus)
+
+                    tx.update(
+                        walletRef,
+                        mapOf(
+                            "totalBalance" to nextTotal,
+                            "depositedBalance" to nextDep,
+                            "winningBalance" to nextWin,
+                            "bonusBalance" to nextBonus,
+                            "earningsBalance" to nextBonus,
+                            "updatedAt" to now
+                        )
+                    )
+                    tx.set(
+                        txRef,
+                        mapOf(
+                            "userId" to uid,
+                            "type" to "TOURNAMENT_ENTRY",
+                            "direction" to "DEBIT",
+                            "description" to "Joined $liveTitle (${liveFee.toInt()} Coins)".take(200),
+                            "matchId" to tournament.id,
+                            "amount" to liveFee,
+                            "status" to "COMPLETED",
+                            "resultingBalance" to nextTotal,
+                            "createdAt" to now
+                        )
+                    )
+                }
+
                 tx.set(
                     regRef,
                     mapOf(
                         "tournamentId" to tournament.id,
-                        "tournamentTitle" to tournament.title.take(80),
+                        "tournamentTitle" to liveTitle,
                         "categoryId" to tournament.categoryId,
                         "userId" to uid,
                         "username" to username.trim().take(32).let { if (it.length < 2) "Player" else it },
                         "inGameName" to inGameName.trim().take(40),
                         "inGameUid" to inGameUid.trim().take(40),
-                        "entryFeePaid" to 0.0,
+                        "entryFeePaid" to liveFee,
                         "status" to "CONFIRMED",
                         "createdAt" to now,
                         "updatedAt" to now

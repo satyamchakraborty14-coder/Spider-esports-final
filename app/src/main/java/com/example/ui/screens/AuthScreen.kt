@@ -377,6 +377,7 @@ fun AuthScreen(
                                 value = mobileNumber,
                                 onValueChange = { mobileNumber = it },
                                 label = { Text("Mobile Number *") },
+                                supportingText = { Text("One account per mobile number (no OTP required)", color = TextMuted) },
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                                 colors = fieldColors,

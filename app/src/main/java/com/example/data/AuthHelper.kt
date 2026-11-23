@@ -20,13 +20,8 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Companion.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.FirebaseAuthException
-import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
-import com.google.firebase.auth.PhoneAuthCredential
-import com.google.firebase.auth.PhoneAuthOptions
-import com.google.firebase.auth.PhoneAuthProvider
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -38,7 +33,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.security.MessageDigest
-import java.util.concurrent.TimeUnit
 
 object AuthHelper {
     private const val TAG = "Auth"
@@ -207,36 +201,6 @@ object AuthHelper {
         val user = Firebase.auth.currentUser
         user?.reload()?.await()
         Result.success(Firebase.auth.currentUser)
-    } catch (e: Exception) {
-        Result.failure(e)
-    }
-
-    fun startPhoneVerification(
-        activity: Activity,
-        phoneNumberE164: String,
-        callbacks: PhoneAuthProvider.OnVerificationStateChangedCallbacks
-    ) {
-        val options = PhoneAuthOptions.newBuilder(Firebase.auth)
-            .setPhoneNumber(phoneNumberE164)
-            .setTimeout(60L, TimeUnit.SECONDS)
-            .setActivity(activity)
-            .setCallbacks(callbacks)
-            .build()
-        PhoneAuthProvider.verifyPhoneNumber(options)
-    }
-
-    suspend fun linkOrUpdatePhoneCredential(credential: PhoneAuthCredential): Result<String> = try {
-        val user = Firebase.auth.currentUser ?: throw IllegalStateException("Must be signed in.")
-        try {
-            user.linkWithCredential(credential).await()
-        } catch (e: FirebaseAuthUserCollisionException) {
-            return Result.failure(IllegalStateException("This mobile number is already linked to another account."))
-        } catch (_: FirebaseAuthException) {
-            user.updatePhoneNumber(credential).await()
-        }
-        user.reload().await()
-        val verifiedNumber = Firebase.auth.currentUser?.phoneNumber ?: ""
-        Result.success(verifiedNumber)
     } catch (e: Exception) {
         Result.failure(e)
     }

@@ -309,7 +309,6 @@ private fun SpiderAppShell(currentUserId: String) {
                     onDone = onDone
                 )
             },
-            onPhoneVerified = { verifiedPhone -> mainViewModel.markPhoneVerified(verifiedPhone) },
             onSignedOut = {}
         )
         return
@@ -499,7 +498,6 @@ private fun SpiderAppShell(currentUserId: String) {
                                 onOpenTeams = { navController.navigate(AppRoutes.TEAMS) },
                                 onOpenSupport = { navController.navigate(AppRoutes.SUPPORT) },
                                 onOpenAdminDashboard = { navController.navigate(AppRoutes.ADMIN_DASHBOARD) },
-                                onPhoneVerified = { verifiedPhone -> mainViewModel.markPhoneVerified(verifiedPhone) },
                                 onSignedOut = {}
                             )
                         }
@@ -515,6 +513,7 @@ private fun SpiderAppShell(currentUserId: String) {
                                 tournamentsState = tournamentsState,
                                 registrations = registrations,
                                 profile = profile,
+                                wallet = wallet,
                                 onBack = { navController.popBackStack() },
                                 onJoinTournament = mainViewModel::registerForTournament
                             )

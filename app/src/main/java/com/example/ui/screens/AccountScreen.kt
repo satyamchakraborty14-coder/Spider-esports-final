@@ -70,8 +70,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.core.net.toUri
 import androidx.credentials.CredentialManager
+import com.example.data.AccountValidationUtil
 import com.example.data.AuthHelper
 import com.example.data.ImagePickerUtil
 import com.example.model.UserProfile
@@ -98,14 +101,13 @@ fun AccountScreen(
     isAdmin: Boolean,
     unreadNotificationsCount: Int,
     telegramUrl: String,
-    onEditProfile: (String, String, String, String, String, String, (Boolean) -> Unit) -> Unit,
+    onEditProfile: (String, String, String, String, String, String, String, (Boolean) -> Unit) -> Unit,
     onOpenMyMatches: () -> Unit,
     onOpenWallet: () -> Unit,
     onOpenNotifications: () -> Unit,
     onOpenTeams: () -> Unit,
     onOpenSupport: () -> Unit,
     onOpenAdminDashboard: () -> Unit,
-    onPhoneVerified: (String) -> Unit = {},
     onSignedOut: () -> Unit
 ) {
     val context = LocalContext.current
@@ -113,7 +115,6 @@ fun AccountScreen(
     val credentialManager = remember(context) { CredentialManager.create(context) }
 
     var showEditDialog by remember { mutableStateOf(false) }
-    var showPhoneOtpDialog by remember { mutableStateOf(false) }
     var legalDialogTitle by remember { mutableStateOf<String?>(null) }
 
     val regDate = remember(profile?.createdAt) {
@@ -187,31 +188,12 @@ fun AccountScreen(
                                     color = TextMuted
                                 )
                                 if (profile != null && profile.phoneNumber.isNotBlank()) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Text(
-                                            text = profile.phoneNumber,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = TextSecondary
-                                        )
-                                        StatusPill(
-                                            text = if (profile.phoneVerified) "PHONE VERIFIED" else "UNVERIFIED",
-                                            color = if (profile.phoneVerified) SpiderEmerald else TextMuted
-                                        )
-                                    }
+                                    Text(
+                                        text = "Mobile: ${profile.phoneNumber}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextSecondary
+                                    )
                                 }
-                            }
-                        }
-
-                        if (profile != null && !profile.phoneVerified) {
-                            OutlinedButton(
-                                onClick = { showPhoneOtpDialog = true },
-                                border = BorderStroke(1.dp, SpiderCardBorder),
-                                modifier = Modifier.fillMaxWidth().testTag("account_verify_phone_button")
-                            ) {
-                                Text("Verify Mobile Number (Firebase OTP)", color = TextPrimary, style = MaterialTheme.typography.labelMedium)
                             }
                         }
 
@@ -319,22 +301,11 @@ fun AccountScreen(
         EditProfileDialog(
             profile = profile,
             onDismiss = { showEditDialog = false },
-            onSave = { username, display, ign, igUid, photoUrl, refBy, done ->
-                onEditProfile(username, display, ign, igUid, photoUrl, refBy) { ok ->
+            onSave = { username, display, ign, igUid, phoneE164, photoUrl, refBy, done ->
+                onEditProfile(username, display, ign, igUid, phoneE164, photoUrl, refBy) { ok ->
                     done(ok)
                     if (ok) showEditDialog = false
                 }
-            }
-        )
-    }
-
-    if (showPhoneOtpDialog && profile != null) {
-        PhoneOtpVerificationDialog(
-            initialPhoneE164 = profile.phoneNumber,
-            onDismiss = { showPhoneOtpDialog = false },
-            onVerified = { verifiedPhone ->
-                onPhoneVerified(verifiedPhone)
-                showPhoneOtpDialog = false
             }
         )
     }
@@ -347,9 +318,9 @@ fun AccountScreen(
             text = {
                 Text(
                     text = if (title == "Privacy Policy") {
-                        "Spider Esports stores your authenticated Google profile, gamer handle, match registrations, and verified statistics securely in Cloud Firestore. PII (email, account status) is isolated to your account and authorized tournament administrators. No ad networks or ad tracking SDKs are integrated."
+                        "Spider Esports stores your authenticated Google profile, gamer handle, unique mobile number, match registrations, and verified statistics securely in Cloud Firestore. PII (email, account status) is isolated to your account and authorized tournament administrators. No ad networks or ad tracking SDKs are integrated."
                     } else {
-                        "1. Fair Play: Cheating, hacking, or score manipulation results in permanent suspension.\n2. Eligibility: Paid-entry tournaments and real-money redemptions remain disabled until adult operator legal, age, and payment-gateway approvals are in place.\n3. Rankings: Only verified match results affect leaderboards and awards."
+                        "1. Fair Play: Cheating, hacking, or score manipulation results in permanent suspension.\n2. Tournaments & Coins: Players with sufficient Wallet coins can join any open match until slots are full. Strictly one account per mobile number.\n3. Rankings: Only verified match results affect leaderboards and awards."
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
@@ -409,7 +380,7 @@ private fun AccountOptionRow(
 private fun EditProfileDialog(
     profile: UserProfile,
     onDismiss: () -> Unit,
-    onSave: (String, String, String, String, String, String, (Boolean) -> Unit) -> Unit
+    onSave: (String, String, String, String, String, String, String, (Boolean) -> Unit) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -417,8 +388,10 @@ private fun EditProfileDialog(
     var displayName by remember { mutableStateOf(profile.displayName) }
     var ign by remember { mutableStateOf(profile.inGameName) }
     var igUid by remember { mutableStateOf(profile.inGameUid) }
+    var phoneInput by remember { mutableStateOf(profile.phoneNumber) }
     var photoUrl by remember { mutableStateOf(profile.photoUrl) }
     var referredBy by remember { mutableStateOf(profile.referredBy) }
+    var phoneError by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
 
     val photoPicker = rememberLauncherForActivityResult(
@@ -471,6 +444,24 @@ private fun EditProfileDialog(
                 OutlinedTextField(value = ign, onValueChange = { ign = it }, label = { Text("In-Game Name") }, singleLine = true, colors = fieldColors, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = igUid, onValueChange = { igUid = it }, label = { Text("In-Game UID") }, singleLine = true, colors = fieldColors, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(
+                    value = phoneInput,
+                    onValueChange = {
+                        phoneInput = it
+                        phoneError = null
+                    },
+                    label = { Text("Mobile Number (e.g. +919876543210)") },
+                    supportingText = {
+                        Text(
+                            phoneError ?: "One unique mobile number per account",
+                            color = if (phoneError != null) SpiderRedBright else TextMuted
+                        )
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    colors = fieldColors,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
                     value = referredBy,
                     onValueChange = { if (profile.referredBy.isBlank()) referredBy = it.uppercase() },
                     enabled = profile.referredBy.isBlank(),
@@ -484,8 +475,17 @@ private fun EditProfileDialog(
         confirmButton = {
             Button(
                 onClick = {
+                    val normPhone = if (phoneInput.isBlank()) "" else AccountValidationUtil.normalizePhoneE164("+91", phoneInput)
+                    if (normPhone.isNotBlank() && !AccountValidationUtil.isValidPhoneE164(normPhone)) {
+                        phoneError = "Enter a valid mobile number with country code (e.g. +919876543210)."
+                        return@Button
+                    }
+                    if (profile.phoneNumber.isNotBlank() && normPhone.isBlank()) {
+                        phoneError = "Mobile number cannot be removed once registered."
+                        return@Button
+                    }
                     saving = true
-                    onSave(username, displayName, ign, igUid, photoUrl, referredBy) { saving = false }
+                    onSave(username, displayName, ign, igUid, normPhone, photoUrl, referredBy) { saving = false }
                 },
                 enabled = !saving && username.trim().length >= 2,
                 colors = ButtonDefaults.buttonColors(containerColor = SpiderRed)

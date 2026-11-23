@@ -392,6 +392,84 @@ service cloud.firestore {
              isValidTimestamp(data.createdAt);
     }
 
+    function canUserIncrementTournamentSlot(tournamentId) {
+      let regPath = /databases/$(database)/documents/registrations/$(tournamentId + '_' + request.auth.uid);
+      return isNotRestrictedUser() &&
+             existing().visibility == 'PUBLIC' &&
+             (existing().status == 'UPCOMING' || existing().status == 'LIVE') &&
+             existing().registeredCount < existing().maxParticipants &&
+             incoming().createdAt == existing().createdAt &&
+             incoming().registeredCount == existing().registeredCount + 1 &&
+             incoming().diff(existing()).affectedKeys().hasOnly(['registeredCount', 'updatedAt']) &&
+             !exists(regPath) &&
+             existsAfter(regPath);
+    }
+
+    function canUserCreateRegistration(regData) {
+      let tourPath = /databases/$(database)/documents/tournaments/$(regData.tournamentId);
+      let tourDoc = get(tourPath).data;
+      let fee = tourDoc.entryFee;
+      let walletPath = /databases/$(database)/documents/wallets/$(request.auth.uid);
+      let txPath = /databases/$(database)/documents/transactions/$('tx_join_' + regData.tournamentId + '_' + request.auth.uid);
+      return isNotRestrictedUser() &&
+             tourDoc.visibility == 'PUBLIC' &&
+             (tourDoc.status == 'UPCOMING' || tourDoc.status == 'LIVE') &&
+             tourDoc.registeredCount < tourDoc.maxParticipants &&
+             getAfter(tourPath).data.registeredCount == tourDoc.registeredCount + 1 &&
+             regData.status == 'CONFIRMED' &&
+             (regData.entryFeePaid - fee) <= 0.01 &&
+             (fee - regData.entryFeePaid) <= 0.01 &&
+             (fee == 0 || (
+               exists(walletPath) &&
+               (get(walletPath).data.totalBalance - getAfter(walletPath).data.totalBalance) >= (fee - 0.01) &&
+               (get(walletPath).data.totalBalance - getAfter(walletPath).data.totalBalance) <= (fee + 0.01) &&
+               existsAfter(txPath)
+             ));
+    }
+
+    function canUserDebitOwnWalletForEntry(userId) {
+      let expectedTotal = incoming().depositedBalance + incoming().winningBalance + incoming().earningsBalance;
+      return isSignedIn() &&
+             request.auth.uid == userId &&
+             isNotRestrictedUser() &&
+             incoming().userId == existing().userId &&
+             incoming().createdAt == existing().createdAt &&
+             incoming().payoutsTotal == existing().payoutsTotal &&
+             incoming().totalBalance < existing().totalBalance &&
+             incoming().depositedBalance <= existing().depositedBalance &&
+             incoming().winningBalance <= existing().winningBalance &&
+             incoming().earningsBalance <= existing().earningsBalance &&
+             (!('bonusBalance' in incoming()) || (
+               incoming().bonusBalance <= existing().get('bonusBalance', existing().earningsBalance) &&
+               (incoming().bonusBalance - incoming().earningsBalance) <= 0.01 &&
+               (incoming().earningsBalance - incoming().bonusBalance) <= 0.01
+             )) &&
+             (incoming().totalBalance - expectedTotal) <= 0.01 &&
+             (expectedTotal - incoming().totalBalance) <= 0.01 &&
+             incoming().diff(existing()).affectedKeys().hasOnly(['totalBalance', 'depositedBalance', 'winningBalance', 'bonusBalance', 'earningsBalance', 'updatedAt']);
+    }
+
+    function canUserCreateJoinTransaction(txId, data) {
+      let tourId = data.matchId;
+      let tourPath = /databases/$(database)/documents/tournaments/$(tourId);
+      let regPath = /databases/$(database)/documents/registrations/$(tourId + '_' + request.auth.uid);
+      return isSignedIn() &&
+             isNotRestrictedUser() &&
+             data.userId == request.auth.uid &&
+             data.type == 'TOURNAMENT_ENTRY' &&
+             data.direction == 'DEBIT' &&
+             data.status == 'COMPLETED' &&
+             tourId is string &&
+             tourId.size() >= 1 &&
+             txId == ('tx_join_' + tourId + '_' + request.auth.uid) &&
+             exists(tourPath) &&
+             data.amount > 0 &&
+             (data.amount - get(tourPath).data.entryFee) <= 0.01 &&
+             (get(tourPath).data.entryFee - data.amount) <= 0.01 &&
+             !exists(regPath) &&
+             existsAfter(regPath);
+    }
+
     // --- COLLECTION RULES ---
 
     match /users/{userId} {
@@ -406,7 +484,7 @@ service cloud.firestore {
                        incoming().wins == 0 &&
                        incoming().verifiedKills == 0 &&
                        incoming().rankingPoints == 0 &&
-                       (!('phoneVerified' in incoming()) || incoming().phoneVerified == false || (request.auth.token.phone_number != null && request.auth.token.phone_number == incoming().phoneNumber)) &&
+                       (!('phoneVerified' in incoming()) || incoming().phoneVerified == false) &&
                        incoming().keys().hasAll(['userId', 'username', 'displayName', 'email', 'playerUid', 'emailVerified', 'referralCode', 'status', 'matchesPlayed', 'wins', 'verifiedKills', 'rankingPoints', 'createdAt', 'updatedAt']) &&
                        incoming().keys().hasOnly(['userId', 'username', 'displayName', 'email', 'photoUrl', 'playerUid', 'inGameName', 'inGameUid', 'phoneNumber', 'phoneVerified', 'emailVerified', 'acceptedTerms', 'onboardingCompleted', 'referralCode', 'referredBy', 'language', 'status', 'matchesPlayed', 'wins', 'verifiedKills', 'rankingPoints', 'createdAt', 'updatedAt']) &&
                        isValidUserProfile(incoming());
@@ -424,7 +502,7 @@ service cloud.firestore {
                            incoming().verifiedKills == existing().verifiedKills &&
                            incoming().rankingPoints == existing().rankingPoints &&
                            (incoming().emailVerified == existing().emailVerified || incoming().emailVerified == request.auth.token.email_verified) &&
-                           (!('phoneVerified' in incoming()) || incoming().phoneVerified == existing().get('phoneVerified', false) || (incoming().phoneVerified == true && request.auth.token.phone_number != null && request.auth.token.phone_number == incoming().phoneNumber)) &&
+                           (!('phoneVerified' in incoming()) || incoming().phoneVerified == existing().get('phoneVerified', false) || incoming().phoneVerified == false) &&
                            (!('referredBy' in incoming()) || existing().get('referredBy', '') == '' || incoming().referredBy == existing().get('referredBy', '')) &&
                            incoming().diff(existing()).affectedKeys().hasOnly(['username', 'displayName', 'photoUrl', 'inGameName', 'inGameUid', 'phoneNumber', 'phoneVerified', 'emailVerified', 'acceptedTerms', 'onboardingCompleted', 'language', 'referredBy', 'updatedAt'])
                          )
@@ -555,17 +633,7 @@ service cloud.firestore {
       allow update: if isSignedIn() &&
                        isValidId(tournamentId) &&
                        isValidTournament(incoming()) && (
-                         isAdmin() || (
-                           existing().visibility == 'PUBLIC' &&
-                           existing().entryFee == 0 &&
-                           (existing().status == 'UPCOMING' || existing().status == 'LIVE') &&
-                           existing().registeredCount < existing().maxParticipants &&
-                           incoming().createdAt == existing().createdAt &&
-                           incoming().registeredCount == existing().registeredCount + 1 &&
-                           incoming().diff(existing()).affectedKeys().hasOnly(['registeredCount', 'updatedAt']) &&
-                           !exists(/databases/$(database)/documents/registrations/$(tournamentId + '_' + request.auth.uid)) &&
-                           existsAfter(/databases/$(database)/documents/registrations/$(tournamentId + '_' + request.auth.uid))
-                         )
+                         isAdmin() || canUserIncrementTournamentSlot(tournamentId)
                        );
       allow delete: if isAdmin() && isValidId(tournamentId);
 
@@ -594,13 +662,7 @@ service cloud.firestore {
                        isValidRegistration(incoming()) &&
                        exists(/databases/$(database)/documents/tournaments/$(incoming().tournamentId)) &&
                        (
-                         isAdmin() || (
-                           get(/databases/$(database)/documents/tournaments/$(incoming().tournamentId)).data.entryFee == 0 &&
-                           get(/databases/$(database)/documents/tournaments/$(incoming().tournamentId)).data.visibility == 'PUBLIC' &&
-                           (get(/databases/$(database)/documents/tournaments/$(incoming().tournamentId)).data.status == 'UPCOMING' || get(/databases/$(database)/documents/tournaments/$(incoming().tournamentId)).data.status == 'LIVE') &&
-                           incoming().entryFeePaid == 0 &&
-                           incoming().status == 'CONFIRMED'
-                         )
+                         isAdmin() || canUserCreateRegistration(incoming())
                        );
       allow update: if isAdmin() && isValidId(registrationId) && isValidRegistration(incoming()) &&
                        incoming().createdAt == existing().createdAt;
@@ -639,14 +701,20 @@ service cloud.firestore {
     match /wallets/{userId} {
       allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
       allow list: if isAdmin();
-      allow create, update: if isAdmin() && isValidId(userId) && isValidWallet(incoming());
+      allow create: if isAdmin() && isValidId(userId) && isValidWallet(incoming());
+      allow update: if isValidId(userId) && isValidWallet(incoming()) && (
+        isAdmin() || canUserDebitOwnWalletForEntry(userId)
+      );
       allow delete: if false;
     }
 
     match /transactions/{txId} {
       allow get: if isSignedIn() && isValidId(txId) && (isAdmin() || (resource != null && existing().userId == request.auth.uid));
       allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
-      allow create, update: if isAdmin() && isValidId(txId) && isValidTransaction(incoming());
+      allow create: if isValidId(txId) && isValidTransaction(incoming()) && (
+        isAdmin() || canUserCreateJoinTransaction(txId, incoming())
+      );
+      allow update: if isAdmin() && isValidId(txId) && isValidTransaction(incoming());
       allow delete: if false;
     }
 

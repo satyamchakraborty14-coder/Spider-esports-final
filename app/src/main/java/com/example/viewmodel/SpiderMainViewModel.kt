@@ -257,6 +257,7 @@ class SpiderMainViewModel(
                 displayName = profile.displayName,
                 inGameName = profile.inGameName,
                 inGameUid = profile.inGameUid,
+                phoneE164 = profile.phoneNumber,
                 photoUrl = profile.photoUrl,
                 language = lang,
                 referredBy = profile.referredBy
@@ -281,14 +282,15 @@ class SpiderMainViewModel(
             return
         }
         viewModelScope.launch {
-            val res = catalogRepo.registerForFreeTournament(
+            val res = catalogRepo.registerForTournament(
                 tournament = tournament,
                 username = profile?.username ?: "Player",
                 inGameName = inGameName,
                 inGameUid = inGameUid
             )
             res.onSuccess {
-                _actionBanner.value = true to "Registered for ${tournament.title}!"
+                val feeNote = if (tournament.entryFee > 0.0) " (${tournament.entryFee.toInt()} Coins deducted)" else ""
+                _actionBanner.value = true to "Registered for ${tournament.title}!$feeNote"
                 onComplete(true)
             }.onFailure { err ->
                 _actionBanner.value = false to (err.localizedMessage ?: "Registration failed")
@@ -312,6 +314,7 @@ class SpiderMainViewModel(
         displayName: String,
         inGameName: String,
         inGameUid: String,
+        phoneE164: String,
         photoUrl: String,
         referredBy: String,
         onDone: (Boolean) -> Unit
@@ -325,6 +328,7 @@ class SpiderMainViewModel(
                 displayName = displayName,
                 inGameName = inGameName,
                 inGameUid = inGameUid,
+                phoneE164 = phoneE164,
                 photoUrl = photoUrl,
                 language = _selectedLanguage.value,
                 referredBy = referredBy
@@ -426,20 +430,6 @@ class SpiderMainViewModel(
                 onDone(true, null)
             }.onFailure { err ->
                 val msg = err.localizedMessage ?: "Could not apply referral code"
-                _actionBanner.value = false to msg
-                onDone(false, msg)
-            }
-        }
-    }
-
-    fun markPhoneVerified(phoneE164: String, onDone: (Boolean, String?) -> Unit = { _, _ -> }) {
-        viewModelScope.launch {
-            val res = userRepo.markPhoneVerified(phoneE164)
-            res.onSuccess {
-                _actionBanner.value = true to "Mobile number $phoneE164 verified!"
-                onDone(true, null)
-            }.onFailure { err ->
-                val msg = err.localizedMessage ?: "Could not save verified mobile number"
                 _actionBanner.value = false to msg
                 onDone(false, msg)
             }

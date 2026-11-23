@@ -456,9 +456,6 @@ fun AdminUsersSection(
                                     text = if (user.emailVerified) "EMAIL VERIFIED" else "EMAIL UNVERIFIED",
                                     color = if (user.emailVerified) SpiderEmerald else SpiderRedBright
                                 )
-                                if (user.phoneVerified) {
-                                    StatusPill(text = "PHONE VERIFIED", color = SpiderEmerald)
-                                }
                             }
                         }
                         StatusPill(user.status, statusColor(user.status))

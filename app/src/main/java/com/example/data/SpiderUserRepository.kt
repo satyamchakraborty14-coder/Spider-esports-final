@@ -81,7 +81,7 @@ class SpiderUserRepository(
                         "inGameName" to baseName,
                         "inGameUid" to "",
                         "phoneNumber" to phone,
-                        "phoneVerified" to phone.isNotBlank(),
+                        "phoneVerified" to false,
                         "emailVerified" to user.isEmailVerified,
                         "acceptedTerms" to false,
                         "onboardingCompleted" to false,
@@ -196,7 +196,7 @@ class SpiderUserRepository(
                     throw IllegalStateException("Game Name '$trimmedGameName' is already taken (case-insensitive).")
                 }
                 if (newPhoneSnap.exists() && newPhoneSnap.getString("userId") != uid) {
-                    throw IllegalStateException("Mobile number '$phoneE164' is already registered to another account.")
+                    throw IllegalStateException("This mobile number ($phoneE164) is already linked to another account. Only one account per mobile number is allowed.")
                 }
                 if (newGameUidSnap.exists() && newGameUidSnap.getString("userId") != uid) {
                     throw IllegalStateException("Game UID '$trimmedGameUid' is already registered to another account.")
@@ -251,7 +251,6 @@ class SpiderUserRepository(
                 }
 
                 val now = FieldValue.serverTimestamp()
-                val phoneIsVerified = user.phoneNumber == phoneE164
 
                 if (!userSnap.exists()) {
                     tx.set(
@@ -266,7 +265,7 @@ class SpiderUserRepository(
                             "inGameName" to trimmedGameName,
                             "inGameUid" to trimmedGameUid,
                             "phoneNumber" to phoneE164,
-                            "phoneVerified" to phoneIsVerified,
+                            "phoneVerified" to false,
                             "emailVerified" to user.isEmailVerified,
                             "acceptedTerms" to true,
                             "onboardingCompleted" to true,
@@ -294,9 +293,6 @@ class SpiderUserRepository(
                         "onboardingCompleted" to true,
                         "updatedAt" to now
                     )
-                    if (phoneIsVerified) {
-                        updates["phoneVerified"] = true
-                    }
                     if (existingReferredBy.isBlank() && effectiveReferredBy.isNotBlank()) {
                         updates["referredBy"] = effectiveReferredBy
                     }
@@ -369,51 +365,6 @@ class SpiderUserRepository(
     } catch (e: Exception) {
         handleFirestoreError(e, OperationType.UPDATE, "users/${user.uid}")
         Result.failure(e)
-    }
-
-    suspend fun markPhoneVerified(phoneE164: String): Result<Unit> {
-        val uid = auth.currentUser?.uid ?: return Result.failure(IllegalStateException("Must be signed in."))
-        val path = "users/$uid"
-        return try {
-            require(AccountValidationUtil.isValidPhoneE164(phoneE164)) { "Invalid E.164 mobile number." }
-            val newPhoneHash = AccountValidationUtil.sha256Hex(phoneE164)
-            db.runTransaction { tx ->
-                val userRef = db.collection("users").document(uid)
-                val userSnap = tx.get(userRef)
-                val phoneRef = db.collection("phoneClaims").document(newPhoneHash)
-                val phoneSnap = tx.get(phoneRef)
-                if (phoneSnap.exists() && phoneSnap.getString("userId") != uid) {
-                    throw IllegalStateException("This mobile number is already claimed by another player.")
-                }
-                val oldPhone = userSnap.getString("phoneNumber") ?: ""
-                val oldPhoneRef = if (oldPhone.isNotBlank() && oldPhone != phoneE164) {
-                    db.collection("phoneClaims").document(AccountValidationUtil.sha256Hex(oldPhone))
-                } else null
-                val oldPhoneSnap = oldPhoneRef?.let { tx.get(it) }
-
-                if (oldPhoneRef != null && oldPhoneSnap?.exists() == true && oldPhoneSnap.getString("userId") == uid) {
-                    tx.delete(oldPhoneRef)
-                }
-                val now = FieldValue.serverTimestamp()
-                if (!phoneSnap.exists()) {
-                    tx.set(phoneRef, mapOf("userId" to uid, "createdAt" to now))
-                }
-                tx.update(
-                    userRef,
-                    mapOf(
-                        "phoneNumber" to phoneE164,
-                        "phoneVerified" to true,
-                        "updatedAt" to now
-                    )
-                )
-            }.await()
-            Result.success(Unit)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.UPDATE, path)
-            Result.failure(e)
-        }
     }
 
     suspend fun applyReferralCodeLater(referralCodeInput: String): Result<Unit> {
@@ -511,6 +462,7 @@ class SpiderUserRepository(
         displayName: String,
         inGameName: String,
         inGameUid: String,
+        phoneE164: String,
         photoUrl: String,
         language: String,
         referredBy: String
@@ -530,6 +482,14 @@ class SpiderUserRepository(
             val newGameUidHash = if (trimmedGameUid.isNotEmpty()) {
                 AccountValidationUtil.sha256Hex(AccountValidationUtil.normalizeGameUidKey(trimmedGameUid))
             } else ""
+
+            val cleanPhone = phoneE164.trim()
+            if (cleanPhone.isNotEmpty()) {
+                require(AccountValidationUtil.isValidPhoneE164(cleanPhone)) {
+                    "Enter a valid international mobile number (e.g. +919876543210)."
+                }
+            }
+            val newPhoneHash = if (cleanPhone.isNotEmpty()) AccountValidationUtil.sha256Hex(cleanPhone) else ""
 
             val refCodeUpper = AccountValidationUtil.normalizeReferralCode(referredBy)
             if (refCodeUpper.isNotBlank() && !AccountValidationUtil.isValidReferralCodeFormat(refCodeUpper)) {
@@ -562,6 +522,18 @@ class SpiderUserRepository(
                 } else null
                 val oldGameUidSnap = oldGameUidRef?.let { tx.get(it) }
 
+                val oldPhone = (userSnap.getString("phoneNumber") ?: "").trim()
+                if (oldPhone.isNotEmpty() && cleanPhone.isEmpty()) {
+                    throw IllegalArgumentException("Mobile number cannot be blank. Only one unique mobile number per account is allowed.")
+                }
+                val newPhoneRef = if (newPhoneHash.isNotEmpty()) db.collection("phoneClaims").document(newPhoneHash) else null
+                val newPhoneSnap = newPhoneRef?.let { tx.get(it) }
+                val oldPhoneHash = if (oldPhone.isNotEmpty()) AccountValidationUtil.sha256Hex(oldPhone) else ""
+                val oldPhoneRef = if (oldPhoneHash.isNotEmpty() && newPhoneHash != oldPhoneHash) {
+                    db.collection("phoneClaims").document(oldPhoneHash)
+                } else null
+                val oldPhoneSnap = oldPhoneRef?.let { tx.get(it) }
+
                 val shouldApplyRef = existingReferredBy.isBlank() && refCodeUpper.isNotBlank()
                 val refCodeSnap = if (shouldApplyRef) tx.get(db.collection("referralCodes").document(refCodeUpper)) else null
                 val existingRefDocSnap = if (shouldApplyRef) tx.get(db.collection("referrals").document(uid)) else null
@@ -571,6 +543,9 @@ class SpiderUserRepository(
                 }
                 if (newGameUidSnap != null && newGameUidSnap.exists() && newGameUidSnap.getString("userId") != uid) {
                     throw IllegalStateException("Game UID '$trimmedGameUid' is already registered to another player.")
+                }
+                if (newPhoneSnap != null && newPhoneSnap.exists() && newPhoneSnap.getString("userId") != uid) {
+                    throw IllegalStateException("This mobile number ($cleanPhone) is already linked to another account. Only one account per mobile number is allowed.")
                 }
 
                 var validReferrerUid = ""
@@ -606,6 +581,14 @@ class SpiderUserRepository(
                         tx.set(newGameUidRef, mapOf("userId" to uid, "createdAt" to now))
                     }
                 }
+                if (newPhoneHash != oldPhoneHash) {
+                    if (oldPhoneRef != null && oldPhoneSnap?.exists() == true && oldPhoneSnap.getString("userId") == uid) {
+                        tx.delete(oldPhoneRef)
+                    }
+                    if (newPhoneRef != null && newPhoneSnap?.exists() != true) {
+                        tx.set(newPhoneRef, mapOf("userId" to uid, "createdAt" to now))
+                    }
+                }
 
                 val updates = mutableMapOf<String, Any>(
                     "username" to trimmedUser,
@@ -616,6 +599,9 @@ class SpiderUserRepository(
                     "language" to language.take(16),
                     "updatedAt" to now
                 )
+                if (cleanPhone.isNotEmpty()) {
+                    updates["phoneNumber"] = cleanPhone.take(24)
+                }
                 if (validReferrerUid.isNotBlank()) {
                     updates["referredBy"] = refCodeUpper.take(24)
                     tx.set(

@@ -24,7 +24,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Gavel
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.AlertDialog
@@ -64,12 +63,12 @@ import com.example.model.TournamentFilter
 import com.example.model.TournamentSort
 import com.example.model.UiState
 import com.example.model.UserProfile
+import com.example.model.Wallet
 import com.example.ui.components.SpiderArtworkImage
 import com.example.ui.components.SpiderBackTopBar
 import com.example.ui.components.SpiderEmptyState
 import com.example.ui.components.StatusPill
 import com.example.ui.components.statusColor
-import com.example.ui.theme.SpiderAmber
 import com.example.ui.theme.SpiderBlack
 import com.example.ui.theme.SpiderCardBorder
 import com.example.ui.theme.SpiderCardDark
@@ -88,6 +87,7 @@ fun TournamentListScreen(
     tournamentsState: UiState<List<Tournament>>,
     registrations: List<Registration>,
     profile: UserProfile?,
+    wallet: Wallet,
     onBack: () -> Unit,
     onJoinTournament: (Tournament, String, String, (Boolean) -> Unit) -> Unit
 ) {
@@ -224,6 +224,7 @@ fun TournamentListScreen(
         JoinTournamentDialog(
             tournament = tour,
             profile = profile,
+            walletBalance = wallet.totalBalance,
             isAlreadyRegistered = tour.id in registeredIds,
             onDismiss = { activeJoinTournament = null },
             onConfirmJoin = { ign, igUid, onDone ->
@@ -374,6 +375,7 @@ private fun MetricItem(label: String, value: String) {
 fun JoinTournamentDialog(
     tournament: Tournament,
     profile: UserProfile?,
+    walletBalance: Double = 0.0,
     isAlreadyRegistered: Boolean,
     onDismiss: () -> Unit,
     onConfirmJoin: (String, String, (Boolean) -> Unit) -> Unit
@@ -383,7 +385,8 @@ fun JoinTournamentDialog(
     var submitting by remember { mutableStateOf(false) }
 
     val isPaid = tournament.entryFee > 0.0
-    val isSuspended = profile?.status == "SUSPENDED"
+    val hasEnoughCoins = !isPaid || (walletBalance + 0.001 >= tournament.entryFee)
+    val isSuspended = profile?.status == "SUSPENDED" || profile?.status == "BANNED"
     val isFull = tournament.registeredCount >= tournament.maxParticipants
 
     AlertDialog(
@@ -397,7 +400,6 @@ fun JoinTournamentDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Verification checklist
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = SpiderSurfaceElevated,
@@ -408,7 +410,7 @@ fun JoinTournamentDialog(
                             Icon(Icons.Filled.VerifiedUser, null, tint = if (isSuspended) SpiderRedBright else SpiderEmerald, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                if (isSuspended) "Account Suspended" else "Account Verified (${profile?.username ?: "Player"})",
+                                if (isSuspended) "Account ${profile?.status ?: "Restricted"}" else "Account Active (${profile?.username ?: "Player"})",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextPrimary
                             )
@@ -424,10 +426,17 @@ fun JoinTournamentDialog(
                             style = MaterialTheme.typography.bodySmall,
                             color = SpiderGold
                         )
+                        if (isPaid) {
+                            Text(
+                                "Your Wallet Balance: ${walletBalance.toInt()} Coins",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (hasEnoughCoins) SpiderEmerald else SpiderRedBright,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
 
-                // Rules box
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Gavel, null, tint = SpiderRedBright, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
@@ -435,23 +444,21 @@ fun JoinTournamentDialog(
                 }
                 Text(tournament.rules, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
 
-                if (isPaid) {
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = SpiderAmber.copy(alpha = 0.14f),
-                        border = BorderStroke(1.dp, SpiderAmber.copy(alpha = 0.5f))
-                    ) {
-                        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.Top) {
-                            Icon(Icons.Filled.Lock, null, tint = SpiderAmber, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
+                if (!isAlreadyRegistered && !isFull && !isSuspended) {
+                    if (!hasEnoughCoins) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = SpiderRed.copy(alpha = 0.14f),
+                            border = BorderStroke(1.dp, SpiderRedBright.copy(alpha = 0.5f))
+                        ) {
                             Text(
-                                "Paid-entry and real-money prize operations remain disabled until required legal, age, and verified payment-gateway approvals are completed. No coins will be deducted.",
+                                "Insufficient coins: ${tournament.entryFee.toInt()} Coins required, you have ${walletBalance.toInt()} Coins. Add coins in Wallet to join.",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = SpiderAmber
+                                color = SpiderRedBright,
+                                modifier = Modifier.padding(10.dp)
                             )
                         }
                     }
-                } else if (!isAlreadyRegistered && !isFull && !isSuspended) {
                     OutlinedTextField(
                         value = ign,
                         onValueChange = { ign = it },
@@ -482,17 +489,28 @@ fun JoinTournamentDialog(
             }
         },
         confirmButton = {
-            if (!isPaid && !isAlreadyRegistered && !isFull && !isSuspended) {
+            if (!isAlreadyRegistered && !isFull && !isSuspended) {
                 Button(
                     onClick = {
                         submitting = true
                         onConfirmJoin(ign, igUid) { submitting = false }
                     },
-                    enabled = !submitting && ign.isNotBlank() && igUid.isNotBlank(),
-                    colors = ButtonDefaults.buttonColors(containerColor = SpiderRed)
+                    enabled = !submitting && ign.isNotBlank() && igUid.isNotBlank() && hasEnoughCoins,
+                    colors = ButtonDefaults.buttonColors(containerColor = SpiderRed),
+                    modifier = Modifier.testTag("confirm_join_tournament_button")
                 ) {
-                    if (submitting) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
-                    else Text("Confirm Free Entry", fontWeight = FontWeight.Bold)
+                    if (submitting) {
+                        CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                    } else {
+                        Text(
+                            text = when {
+                                !hasEnoughCoins -> "Insufficient Coins (${walletBalance.toInt()}/${tournament.entryFee.toInt()})"
+                                isPaid -> "Confirm & Pay ${tournament.entryFee.toInt()} Coins"
+                                else -> "Confirm Free Entry"
+                            },
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         },

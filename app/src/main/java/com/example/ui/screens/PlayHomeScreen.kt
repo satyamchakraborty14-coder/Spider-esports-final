@@ -582,6 +582,7 @@ fun PlayHomeScreen(
         JoinTournamentDialog(
             tournament = tour,
             profile = profile,
+            walletBalance = wallet.totalBalance,
             isAlreadyRegistered = tour.id in registeredIds,
             onDismiss = { joinModalTournament = null },
             onConfirmJoin = { ign, igUid, done ->
