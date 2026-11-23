@@ -392,11 +392,11 @@ class SpiderAdminRepository(
             "status" to tourStatus,
             "soloFormat" to gameMode.contains("SOLO", ignoreCase = true),
             "randomTournament" to true,
-            "roomReleased" to false,
             "updatedAt" to now
         )
         if (existingTypeId.isNullOrBlank()) {
             tourPayload["registeredCount"] = 0L
+            tourPayload["roomReleased"] = false
             tourPayload["createdAt"] = now
             batch.set(tourRef, tourPayload)
         } else {
@@ -465,6 +465,7 @@ class SpiderAdminRepository(
         existingId: String?,
         categoryId: String,
         title: String,
+        shortDescription: String,
         gameMode: String,
         mapName: String,
         entryFee: Double,
@@ -473,6 +474,11 @@ class SpiderAdminRepository(
         maxParticipants: Long,
         matchDate: String,
         matchTime: String,
+        registrationDeadline: String,
+        rules: String,
+        bannerUrl: String,
+        presetKey: String,
+        visibility: String,
         status: String,
         soloFormat: Boolean
     ): Result<Unit> = runAdminMutation("tournaments") { uid, email ->
@@ -480,39 +486,62 @@ class SpiderAdminRepository(
         val now = FieldValue.serverTimestamp()
         val ref = db.collection("tournaments").document(id)
         val batch = db.batch()
+        val safeMode = gameMode.trim().take(40).ifBlank { "BATTLE ROYALE" }
+        val safeMap = mapName.trim().take(40).ifBlank { "Bermuda" }
+        val safeDesc = shortDescription.trim().take(300).ifBlank { "$safeMode tournament on $safeMap" }
+        val safeDeadline = registrationDeadline.trim().take(60).ifBlank { "$matchDate $matchTime".trim() }
+        val safeRules = rules.trim().take(4000).ifBlank { "Fair-play rules enforced. Zero hacks or teaming." }
+        val safeVisibility = if (visibility in listOf("PUBLIC", "HIDDEN")) visibility else "PUBLIC"
+        val safeStatus = if (status in listOf("UPCOMING", "LIVE", "FULL", "COMPLETED", "CANCELLED", "ARCHIVED")) status else "UPCOMING"
         val data = mutableMapOf<String, Any>(
             "categoryId" to categoryId,
             "title" to title.trim().take(80),
-            "shortDescription" to "$gameMode tournament on $mapName",
-            "gameMode" to gameMode.trim().take(40),
-            "mapName" to mapName.trim().take(40),
+            "shortDescription" to safeDesc,
+            "gameMode" to safeMode,
+            "mapName" to safeMap,
             "entryFee" to entryFee.coerceAtLeast(0.0),
             "prizePool" to prizePool.coerceAtLeast(0.0),
             "perKillReward" to perKillReward.coerceAtLeast(0.0),
             "maxParticipants" to maxParticipants.coerceIn(2L, 500L),
             "matchDate" to matchDate.trim().take(40),
             "matchTime" to matchTime.trim().take(40),
-            "registrationDeadline" to "$matchDate $matchTime",
-            "rules" to "Fair-play rules enforced. Zero hacks or teaming.",
-            "bannerUrl" to "",
-            "presetKey" to "battle_royale",
-            "visibility" to "PUBLIC",
-            "status" to status,
+            "registrationDeadline" to safeDeadline,
+            "rules" to safeRules,
+            "bannerUrl" to bannerUrl.take(200000),
+            "presetKey" to presetKey.ifBlank { "battle_royale" },
+            "visibility" to safeVisibility,
+            "status" to safeStatus,
             "soloFormat" to soloFormat,
-            "randomTournament" to false,
-            "roomReleased" to false,
             "updatedAt" to now
         )
         if (existingId.isNullOrBlank()) {
             data["registeredCount"] = 0L
+            data["randomTournament"] = false
+            data["roomReleased"] = false
             data["createdAt"] = now
             batch.set(ref, data)
         } else {
             batch.update(ref, data)
         }
-        appendAudit(batch, uid, email, "SAVE_TOURNAMENT", "tournaments", id, "Saved tournament $title")
+        appendAudit(
+            batch,
+            uid,
+            email,
+            if (existingId.isNullOrBlank()) "CREATE_TOURNAMENT" else "UPDATE_TOURNAMENT",
+            "tournaments",
+            id,
+            "Saved tournament $title (Per Kill=${perKillReward.toInt()}, Prize=${prizePool.toInt()})"
+        )
         batch.commit().await()
     }
+
+    suspend fun deleteTournament(tournament: Tournament): Result<Unit> =
+        runAdminMutation("tournaments/${tournament.id}") { uid, email ->
+            val batch = db.batch()
+            batch.delete(db.collection("tournaments").document(tournament.id))
+            appendAudit(batch, uid, email, "DELETE_TOURNAMENT", "tournaments", tournament.id, "Deleted tournament ${tournament.title}")
+            batch.commit().await()
+        }
 
     suspend fun publishRoomCredentials(
         tournament: Tournament,

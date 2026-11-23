@@ -21,9 +21,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -34,6 +37,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -56,6 +60,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.data.AuthHelper
 import com.example.data.ImagePickerUtil
@@ -99,6 +104,8 @@ fun AdminTournamentsSection(
     adminViewModel: SpiderAdminViewModel
 ) {
     var showCreate by remember { mutableStateOf(false) }
+    var editingTournament by remember { mutableStateOf<Tournament?>(null) }
+    var deleteTarget by remember { mutableStateOf<Tournament?>(null) }
     var roomTarget by remember { mutableStateOf<Tournament?>(null) }
     var resultTarget by remember { mutableStateOf<Tournament?>(null) }
 
@@ -111,7 +118,7 @@ fun AdminTournamentsSection(
                 onClick = { showCreate = true },
                 colors = ButtonDefaults.buttonColors(containerColor = SpiderRed),
                 shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth().height(48.dp)
+                modifier = Modifier.fillMaxWidth().height(48.dp).testTag("admin_create_tournament")
             ) {
                 Icon(Icons.Filled.Add, null)
                 Spacer(Modifier.width(6.dp))
@@ -127,11 +134,34 @@ fun AdminTournamentsSection(
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(tour.title, style = MaterialTheme.typography.titleSmall, color = TextPrimary)
-                            Text("${tour.gameMode} • ${tour.mapName} • Slots ${tour.registeredCount}/${tour.maxParticipants}", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                            Text(
+                                "${tour.gameMode} • ${tour.mapName} • Slots ${tour.registeredCount}/${tour.maxParticipants}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
+                            )
+                            Text(
+                                "Entry: ${if (tour.entryFee <= 0.0) "FREE" else "${tour.entryFee.toInt()} Coins"} • Prize: ${tour.prizePool.toInt()} Coins • Per Kill: ${tour.perKillReward.toInt()} Coins",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = SpiderGold
+                            )
                         }
-                        StatusPill(tour.status, statusColor(tour.status))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            StatusPill(tour.status, statusColor(tour.status))
+                            IconButton(
+                                onClick = { editingTournament = tour },
+                                modifier = Modifier.testTag("edit_tournament_${tour.id}")
+                            ) {
+                                Icon(Icons.Filled.Edit, "Edit tournament", tint = TextPrimary)
+                            }
+                            IconButton(
+                                onClick = { deleteTarget = tour },
+                                modifier = Modifier.testTag("delete_tournament_${tour.id}")
+                            ) {
+                                Icon(Icons.Filled.Delete, "Delete tournament", tint = SpiderRedBright)
+                            }
+                        }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
@@ -158,73 +188,68 @@ fun AdminTournamentsSection(
         }
     }
 
-    if (showCreate) {
-        var title by remember { mutableStateOf("") }
-        var selectedCat by remember { mutableStateOf(categories.firstOrNull()) }
-        var mapName by remember { mutableStateOf("Bermuda") }
-        var entryFee by remember { mutableStateOf("0") }
-        var prizePool by remember { mutableStateOf("0") }
-        var maxP by remember { mutableStateOf("48") }
-        var matchDate by remember { mutableStateOf("Today") }
-        var matchTime by remember { mutableStateOf("20:00") }
-        var solo by remember { mutableStateOf(false) }
+    if (showCreate || editingTournament != null) {
+        TournamentEditorDialog(
+            initial = editingTournament,
+            categories = categories,
+            onDismiss = {
+                showCreate = false
+                editingTournament = null
+            },
+            onSave = { categoryId, title, shortDesc, gameMode, mapName, entryFee, prizePool, perKillReward, maxP, matchDate, matchTime, deadline, rules, bannerUrl, presetKey, visibility, status, solo ->
+                adminViewModel.saveTournament(
+                    existingId = editingTournament?.id,
+                    categoryId = categoryId,
+                    title = title,
+                    shortDescription = shortDesc,
+                    gameMode = gameMode,
+                    mapName = mapName,
+                    entryFee = entryFee,
+                    prizePool = prizePool,
+                    perKillReward = perKillReward,
+                    maxParticipants = maxP,
+                    matchDate = matchDate,
+                    matchTime = matchTime,
+                    registrationDeadline = deadline,
+                    rules = rules,
+                    bannerUrl = bannerUrl,
+                    presetKey = presetKey,
+                    visibility = visibility,
+                    status = status,
+                    soloFormat = solo
+                )
+                showCreate = false
+                editingTournament = null
+            }
+        )
+    }
 
+    deleteTarget?.let { tour ->
         AlertDialog(
-            onDismissRequest = { showCreate = false },
+            onDismissRequest = { deleteTarget = null },
             containerColor = SpiderCardDark,
-            title = { Text("Create Tournament", color = TextPrimary) },
+            title = { Text("Delete Tournament?", color = TextPrimary) },
             text = {
-                Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val fc = adminFieldColors()
-                    OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") }, singleLine = true, colors = fc, modifier = Modifier.fillMaxWidth())
-                    Text("Category: ${selectedCat?.categoryName ?: "None"}", style = MaterialTheme.typography.labelSmall, color = SpiderGold)
-                    Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        categories.forEach { cat ->
-                            FilterChip(
-                                selected = selectedCat?.id == cat.id,
-                                onClick = { selectedCat = cat },
-                                label = { Text(cat.categoryName, style = MaterialTheme.typography.labelSmall) },
-                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = SpiderRed, selectedLabelColor = Color.White, containerColor = SpiderSurfaceElevated, labelColor = TextSecondary)
-                            )
-                        }
-                    }
-                    OutlinedTextField(value = mapName, onValueChange = { mapName = it }, label = { Text("Map") }, singleLine = true, colors = fc, modifier = Modifier.fillMaxWidth())
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(value = entryFee, onValueChange = { entryFee = it }, label = { Text("Entry") }, singleLine = true, colors = fc, modifier = Modifier.weight(1f))
-                        OutlinedTextField(value = prizePool, onValueChange = { prizePool = it }, label = { Text("Prize") }, singleLine = true, colors = fc, modifier = Modifier.weight(1f))
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(value = maxP, onValueChange = { maxP = it.filter { c -> c.isDigit() } }, label = { Text("Max Slots") }, singleLine = true, colors = fc, modifier = Modifier.weight(1f))
-                        OutlinedTextField(value = matchTime, onValueChange = { matchTime = it }, label = { Text("Time") }, singleLine = true, colors = fc, modifier = Modifier.weight(1f))
-                    }
-                    OutlinedTextField(value = matchDate, onValueChange = { matchDate = it }, label = { Text("Date") }, singleLine = true, colors = fc, modifier = Modifier.fillMaxWidth())
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                        Text("Solo Tab Format", color = TextPrimary)
-                        Switch(checked = solo, onCheckedChange = { solo = it }, colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = SpiderRed))
-                    }
-                }
+                Text(
+                    "Remove '${tour.title}' (${tour.gameMode}) from Spider Esports? This cannot be undone.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        val cat = selectedCat
-                        if (cat != null) {
-                            adminViewModel.saveTournament(
-                                null, cat.id, title, cat.categoryName, mapName,
-                                entryFee.toDoubleOrNull() ?: 0.0,
-                                prizePool.toDoubleOrNull() ?: 0.0,
-                                0.0,
-                                maxP.toLongOrNull() ?: 48L,
-                                matchDate, matchTime, "UPCOMING", solo
-                            )
-                            showCreate = false
-                        }
+                        adminViewModel.deleteTournament(tour)
+                        deleteTarget = null
                     },
-                    enabled = title.trim().length >= 2 && selectedCat != null,
-                    colors = ButtonDefaults.buttonColors(containerColor = SpiderRed)
-                ) { Text("Publish") }
+                    colors = ButtonDefaults.buttonColors(containerColor = SpiderRedBright)
+                ) { Text("Delete") }
             },
-            dismissButton = { TextButton(onClick = { showCreate = false }) { Text("Cancel", color = TextSecondary) } }
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            }
         )
     }
 
@@ -269,6 +294,11 @@ fun AdminTournamentsSection(
             title = { Text("Verify Result: ${tour.title}", color = TextPrimary) },
             text = {
                 Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Prize Pool: ${tour.prizePool.toInt()} Coins • Per Kill: ${tour.perKillReward.toInt()} Coins",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = SpiderGold
+                    )
                     Text("Player: ${selectedUser?.username ?: "No users"}", style = MaterialTheme.typography.labelLarge, color = SpiderGold)
                     if (users.isNotEmpty()) {
                         Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -283,9 +313,49 @@ fun AdminTournamentsSection(
                         }
                     }
                     val fc = adminFieldColors()
-                    OutlinedTextField(value = placement, onValueChange = { placement = it.filter { c -> c.isDigit() } }, label = { Text("Placement #") }, singleLine = true, colors = fc, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(value = kills, onValueChange = { kills = it.filter { c -> c.isDigit() } }, label = { Text("Verified Kills") }, singleLine = true, colors = fc, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(value = reward, onValueChange = { reward = it }, label = { Text("Reward Coins") }, singleLine = true, colors = fc, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(
+                        value = placement,
+                        onValueChange = { placement = it.filter { c -> c.isDigit() } },
+                        label = { Text("Placement #") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        colors = fc,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = kills,
+                        onValueChange = { kills = it.filter { c -> c.isDigit() } },
+                        label = { Text("Verified Kills") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        colors = fc,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (tour.perKillReward > 0.0) {
+                        val killBonus = (kills.toLongOrNull() ?: 0L) * tour.perKillReward
+                        OutlinedButton(
+                            onClick = {
+                                reward = if (killBonus % 1.0 == 0.0) killBonus.toInt().toString() else killBonus.toString()
+                            },
+                            border = BorderStroke(1.dp, SpiderGold.copy(alpha = 0.6f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                "Use Kill Reward (+${killBonus.toInt()} Coins)",
+                                color = SpiderGold,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = reward,
+                        onValueChange = { reward = it.filterDecimalInput() },
+                        label = { Text("Reward Coins") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        colors = fc,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                     Text("Leaderboard Mode", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf("SOLO", "DUO", "LONE_WOLF", "CLASH_SQUAD").forEach { m ->

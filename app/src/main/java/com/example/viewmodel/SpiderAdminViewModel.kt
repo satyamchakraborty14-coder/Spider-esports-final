@@ -182,6 +182,7 @@ class SpiderAdminViewModel(
         existingId: String?,
         categoryId: String,
         title: String,
+        shortDescription: String,
         gameMode: String,
         mapName: String,
         entryFee: Double,
@@ -190,16 +191,30 @@ class SpiderAdminViewModel(
         maxParticipants: Long,
         matchDate: String,
         matchTime: String,
+        registrationDeadline: String,
+        rules: String,
+        bannerUrl: String,
+        presetKey: String,
+        visibility: String,
         status: String,
         soloFormat: Boolean
     ) {
         viewModelScope.launch {
             adminRepo.saveTournament(
-                existingId, categoryId, title, gameMode, mapName,
+                existingId, categoryId, title, shortDescription, gameMode, mapName,
                 entryFee, prizePool, perKillReward, maxParticipants,
-                matchDate, matchTime, status, soloFormat
+                matchDate, matchTime, registrationDeadline, rules,
+                bannerUrl, presetKey, visibility, status, soloFormat
             ).onSuccess { _statusMessage.value = true to "Tournament '$title' saved." }
                 .onFailure { _statusMessage.value = false to (it.localizedMessage ?: "Failed to save tournament") }
+        }
+    }
+
+    fun deleteTournament(tournament: Tournament) {
+        viewModelScope.launch {
+            adminRepo.deleteTournament(tournament)
+                .onSuccess { _statusMessage.value = true to "Tournament '${tournament.title}' deleted." }
+                .onFailure { _statusMessage.value = false to (it.localizedMessage ?: "Failed to delete tournament") }
         }
     }
 

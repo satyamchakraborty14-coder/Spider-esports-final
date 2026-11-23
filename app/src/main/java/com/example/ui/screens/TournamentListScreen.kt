@@ -306,7 +306,7 @@ private fun TournamentDetailCard(
                 ) {
                     MetricItem("ENTRY FEE", if (tournament.entryFee <= 0.0) "FREE" else "${tournament.entryFee.toInt()} Coins")
                     MetricItem("PRIZE POOL", if (tournament.prizePool <= 0.0) "Points" else "${tournament.prizePool.toInt()} Coins")
-                    MetricItem("PER KILL", if (tournament.perKillReward <= 0.0) "0" else "${tournament.perKillReward.toInt()} Coins")
+                    MetricItem("PER KILL", if (tournament.perKillReward <= 0.0) "0 Coins" else "${tournament.perKillReward.toInt()} Coins")
                     MetricItem("SLOTS", "${tournament.registeredCount}/${tournament.maxParticipants}")
                 }
 
@@ -414,7 +414,16 @@ fun JoinTournamentDialog(
                             )
                         }
                         Text("Mode: ${tournament.gameMode} • Map: ${tournament.mapName}", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-                        Text("Entry Fee: ${if (isPaid) "${tournament.entryFee} Coins" else "FREE"} • Slots: ${tournament.registeredCount}/${tournament.maxParticipants}", style = MaterialTheme.typography.bodySmall, color = SpiderGold)
+                        Text(
+                            "Entry Fee: ${if (isPaid) "${tournament.entryFee.toInt()} Coins" else "FREE"} • Slots: ${tournament.registeredCount}/${tournament.maxParticipants}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SpiderGold
+                        )
+                        Text(
+                            "Prize Pool: ${if (tournament.prizePool <= 0.0) "Rank Pts" else "${tournament.prizePool.toInt()} Coins"} • Per Kill: ${tournament.perKillReward.toInt()} Coins",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SpiderGold
+                        )
                     }
                 }
 

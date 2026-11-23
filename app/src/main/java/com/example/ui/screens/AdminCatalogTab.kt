@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -55,6 +56,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.data.ImagePickerUtil
 import com.example.model.CustomTournamentType
@@ -280,6 +282,11 @@ fun AdminRandomTournamentsSection(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(item.displayName, style = MaterialTheme.typography.titleSmall, color = TextPrimary)
                         Text("${item.gameMode} • ${item.mapName} • Max ${item.maxParticipants}", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                        Text(
+                            "Entry: ${if (item.entryFee <= 0.0) "FREE" else "${item.entryFee.toInt()} Coins"} • Prize: ${item.prizePool.toInt()} • Per Kill: ${item.perKillReward.toInt()} Coins",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = SpiderGold
+                        )
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
                             StatusPill(item.status, SpiderGold)
                             StatusPill(if (item.enabled && !item.archived) "LIVE" else "HIDDEN", if (item.enabled && !item.archived) SpiderEmerald else SpiderRedBright)
@@ -327,9 +334,27 @@ private fun RandomTournamentEditorDialog(
     var shortDesc by remember { mutableStateOf(initial?.shortDescription ?: "") }
     var gameMode by remember { mutableStateOf(initial?.gameMode ?: "CUSTOM ARENA") }
     var mapName by remember { mutableStateOf(initial?.mapName ?: "Bermuda") }
-    var entryFee by remember { mutableStateOf((initial?.entryFee ?: 0.0).toString()) }
-    var prizePool by remember { mutableStateOf((initial?.prizePool ?: 0.0).toString()) }
-    var perKill by remember { mutableStateOf((initial?.perKillReward ?: 0.0).toString()) }
+    var entryFee by remember {
+        mutableStateOf(
+            if (initial == null || initial.entryFee == 0.0) "0"
+            else if (initial.entryFee % 1.0 == 0.0) initial.entryFee.toInt().toString()
+            else initial.entryFee.toString()
+        )
+    }
+    var prizePool by remember {
+        mutableStateOf(
+            if (initial == null || initial.prizePool == 0.0) "0"
+            else if (initial.prizePool % 1.0 == 0.0) initial.prizePool.toInt().toString()
+            else initial.prizePool.toString()
+        )
+    }
+    var perKill by remember {
+        mutableStateOf(
+            if (initial == null || initial.perKillReward == 0.0) "0"
+            else if (initial.perKillReward % 1.0 == 0.0) initial.perKillReward.toInt().toString()
+            else initial.perKillReward.toString()
+        )
+    }
     var maxParticipants by remember { mutableStateOf((initial?.maxParticipants ?: 48L).toString()) }
     var matchDate by remember { mutableStateOf(initial?.matchDate ?: "Today") }
     var matchTime by remember { mutableStateOf(initial?.matchTime ?: "20:00") }
@@ -377,12 +402,44 @@ private fun RandomTournamentEditorDialog(
                     OutlinedTextField(value = mapName, onValueChange = { mapName = it }, label = { Text("Map") }, singleLine = true, colors = fc, modifier = Modifier.weight(1f))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = entryFee, onValueChange = { entryFee = it }, label = { Text("Entry Fee") }, singleLine = true, colors = fc, modifier = Modifier.weight(1f))
-                    OutlinedTextField(value = prizePool, onValueChange = { prizePool = it }, label = { Text("Prize Pool") }, singleLine = true, colors = fc, modifier = Modifier.weight(1f))
+                    OutlinedTextField(
+                        value = entryFee,
+                        onValueChange = { entryFee = it.filterDecimalInput() },
+                        label = { Text("Entry Fee (Coins)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        colors = fc,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = prizePool,
+                        onValueChange = { prizePool = it.filterDecimalInput() },
+                        label = { Text("Prize Pool (Coins)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        colors = fc,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = perKill, onValueChange = { perKill = it }, label = { Text("Per Kill") }, singleLine = true, colors = fc, modifier = Modifier.weight(1f))
-                    OutlinedTextField(value = maxParticipants, onValueChange = { maxParticipants = it.filter { c -> c.isDigit() } }, label = { Text("Max Players") }, singleLine = true, colors = fc, modifier = Modifier.weight(1f))
+                    OutlinedTextField(
+                        value = perKill,
+                        onValueChange = { perKill = it.filterDecimalInput() },
+                        label = { Text("Per Kill (Coins)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        colors = fc,
+                        modifier = Modifier.weight(1f).testTag("random_tournament_per_kill_input")
+                    )
+                    OutlinedTextField(
+                        value = maxParticipants,
+                        onValueChange = { maxParticipants = it.filter { c -> c.isDigit() } },
+                        label = { Text("Max Players") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        colors = fc,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(value = matchDate, onValueChange = { matchDate = it }, label = { Text("Match Date") }, singleLine = true, colors = fc, modifier = Modifier.weight(1f))
@@ -390,7 +447,15 @@ private fun RandomTournamentEditorDialog(
                 }
                 OutlinedTextField(value = deadline, onValueChange = { deadline = it }, label = { Text("Registration Deadline") }, singleLine = true, colors = fc, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = rules, onValueChange = { rules = it }, label = { Text("Tournament Rules") }, minLines = 2, colors = fc, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = displayOrder, onValueChange = { displayOrder = it.filter { c -> c.isDigit() } }, label = { Text("Display Position Order") }, singleLine = true, colors = fc, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    value = displayOrder,
+                    onValueChange = { displayOrder = it.filter { c -> c.isDigit() } },
+                    label = { Text("Display Position Order") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = fc,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf("UPCOMING", "LIVE", "COMPLETED", "ARCHIVED").forEach { st ->

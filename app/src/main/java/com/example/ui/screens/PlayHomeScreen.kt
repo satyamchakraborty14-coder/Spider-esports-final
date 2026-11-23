@@ -767,40 +767,53 @@ private fun SoloTournamentCard(
                 }
             }
 
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Column {
-                    Text("ENTRY", style = MaterialTheme.typography.labelSmall, color = TextMuted)
-                    Text(
-                        if (tournament.entryFee <= 0.0) "FREE" else "${tournament.entryFee.toInt()} Coins",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = if (tournament.entryFee <= 0.0) SpiderEmerald else SpiderGold
-                    )
-                }
-                Column {
-                    Text("PRIZE", style = MaterialTheme.typography.labelSmall, color = TextMuted)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.EmojiEvents, null, tint = SpiderGold, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(3.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text("ENTRY", style = MaterialTheme.typography.labelSmall, color = TextMuted)
                         Text(
-                            if (tournament.prizePool <= 0.0) "Rank Pts" else "${tournament.prizePool.toInt()} Coins",
+                            if (tournament.entryFee <= 0.0) "FREE" else "${tournament.entryFee.toInt()} Coins",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = if (tournament.entryFee <= 0.0) SpiderEmerald else SpiderGold
+                        )
+                    }
+                    Column {
+                        Text("PRIZE", style = MaterialTheme.typography.labelSmall, color = TextMuted)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.EmojiEvents, null, tint = SpiderGold, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(3.dp))
+                            Text(
+                                if (tournament.prizePool <= 0.0) "Rank Pts" else "${tournament.prizePool.toInt()} Coins",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = TextPrimary
+                            )
+                        }
+                    }
+                    Column {
+                        Text("PER KILL", style = MaterialTheme.typography.labelSmall, color = TextMuted)
+                        Text(
+                            if (tournament.perKillReward <= 0.0) "0 Coins" else "${tournament.perKillReward.toInt()} Coins",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = SpiderGold
+                        )
+                    }
+                    Column {
+                        Text("SLOTS", style = MaterialTheme.typography.labelSmall, color = TextMuted)
+                        Text(
+                            "$availableSlots / ${tournament.maxParticipants}",
                             style = MaterialTheme.typography.titleSmall,
                             color = TextPrimary
                         )
                     }
-                }
-                Column {
-                    Text("SLOTS", style = MaterialTheme.typography.labelSmall, color = TextMuted)
-                    Text(
-                        "$availableSlots / ${tournament.maxParticipants}",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = TextPrimary
-                    )
                 }
                 Button(
                     onClick = onJoinClick,
@@ -810,9 +823,12 @@ private fun SoloTournamentCard(
                         contentColor = Color.White
                     ),
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.testTag("solo_join_${tournament.id}")
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("solo_join_${tournament.id}")
                 ) {
-                    Text(if (isRegistered) "JOINED" else "JOIN", style = MaterialTheme.typography.labelLarge)
+                    Text(if (isRegistered) "JOINED" else "JOIN TOURNAMENT", style = MaterialTheme.typography.labelLarge)
                 }
             }
         }
