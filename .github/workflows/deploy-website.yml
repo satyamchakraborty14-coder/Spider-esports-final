@@ -73,14 +73,23 @@ jobs:
                 -dname "CN=Android Debug,O=Android,C=US"
             fi
           fi
-          FINGERPRINTS="$(keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android | grep -E 'SHA1:|SHA256:' || true)"
-          echo "=== APK Signing Fingerprints (must be registered in Firebase Console for Google Sign-In) ==="
-          echo "$FINGERPRINTS"
+          KEYTOOL_OUT="$(keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android)"
+          SHA1_CLEAN="$(printf '%s\n' "$KEYTOOL_OUT" | sed -nE 's/.*SHA-?1:[[:space:]]*(([0-9A-Fa-f]{2}:){19}[0-9A-Fa-f]{2}).*/\1/p' | head -n1)"
+          SHA256_CLEAN="$(printf '%s\n' "$KEYTOOL_OUT" | sed -nE 's/.*SHA-?256:[[:space:]]*(([0-9A-Fa-f]{2}:){31}[0-9A-Fa-f]{2}).*/\1/p' | head -n1)"
+          echo "=== APK Signing Fingerprints (paste ONLY the hex string into Firebase Console) ==="
+          echo "SHA1=$SHA1_CLEAN"
+          echo "SHA256=$SHA256_CLEAN"
           {
             echo "### Spider Esports APK Signing Fingerprints"
-            echo "Add these in Firebase Console -> Project Settings -> \`com.aistudio.spideresports.vkmrqp\` -> Add fingerprint (required once for Google Sign-In):"
+            echo "Paste each code below into **Firebase Console -> Project Settings -> \`com.aistudio.spideresports.vkmrqp\` -> Add fingerprint**:"
+            echo ""
+            echo "**SHA-1:**"
             echo '```text'
-            echo "$FINGERPRINTS"
+            echo "$SHA1_CLEAN"
+            echo '```'
+            echo "**SHA-256:**"
+            echo '```text'
+            echo "$SHA256_CLEAN"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
