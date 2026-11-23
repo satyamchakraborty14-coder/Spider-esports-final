@@ -67,9 +67,11 @@ import com.example.data.ImagePickerUtil
 import com.example.model.AdminUserRecord
 import com.example.model.Announcement
 import com.example.model.Dispute
+import com.example.model.MatchResult
 import com.example.model.PaymentOrder
 import com.example.model.PayoutRequest
 import com.example.model.ReferralRecord
+import com.example.model.Registration
 import com.example.model.SupportTicket
 import com.example.model.Tournament
 import com.example.model.TournamentCategory
@@ -101,6 +103,8 @@ fun AdminTournamentsSection(
     tournaments: List<Tournament>,
     categories: List<TournamentCategory>,
     users: List<UserProfile>,
+    registrations: List<Registration>,
+    results: List<MatchResult>,
     adminViewModel: SpiderAdminViewModel
 ) {
     var showCreate by remember { mutableStateOf(false) }
@@ -173,14 +177,19 @@ fun AdminTournamentsSection(
                             Spacer(Modifier.width(4.dp))
                             Text("Room Creds", color = TextPrimary, style = MaterialTheme.typography.labelSmall)
                         }
+                        val rankedCount = results.count { it.tournamentId == tour.id }
                         OutlinedButton(
                             onClick = { resultTarget = tour },
-                            border = BorderStroke(1.dp, SpiderCardBorder),
-                            modifier = Modifier.weight(1f)
+                            border = BorderStroke(1.dp, if (rankedCount > 0) SpiderGold.copy(alpha = 0.65f) else SpiderCardBorder),
+                            modifier = Modifier.weight(1f).testTag("admin_verify_results_${tour.id}")
                         ) {
                             Icon(Icons.Filled.EmojiEvents, null, tint = SpiderGold, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("Verify Result", color = TextPrimary, style = MaterialTheme.typography.labelSmall)
+                            Text(
+                                if (rankedCount > 0) "Results ($rankedCount/48)" else "Results (1–48)",
+                                color = TextPrimary,
+                                style = MaterialTheme.typography.labelSmall
+                            )
                         }
                     }
                 }
@@ -282,112 +291,32 @@ fun AdminTournamentsSection(
     }
 
     resultTarget?.let { tour ->
-        var selectedUser by remember { mutableStateOf(users.firstOrNull()) }
-        var placement by remember { mutableStateOf("1") }
-        var kills by remember { mutableStateOf("5") }
-        var reward by remember { mutableStateOf("0") }
-        var mode by remember { mutableStateOf("SOLO") }
-
-        AlertDialog(
-            onDismissRequest = { resultTarget = null },
-            containerColor = SpiderCardDark,
-            title = { Text("Verify Result: ${tour.title}", color = TextPrimary) },
-            text = {
-                Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        "Prize Pool: ${tour.prizePool.toInt()} Coins • Per Kill: ${tour.perKillReward.toInt()} Coins",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = SpiderGold
-                    )
-                    Text("Player: ${selectedUser?.username ?: "No users"}", style = MaterialTheme.typography.labelLarge, color = SpiderGold)
-                    if (users.isNotEmpty()) {
-                        Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            users.forEach { u ->
-                                FilterChip(
-                                    selected = selectedUser?.userId == u.userId,
-                                    onClick = { selectedUser = u },
-                                    label = { Text(u.username, style = MaterialTheme.typography.labelSmall) },
-                                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = SpiderRed, selectedLabelColor = Color.White, containerColor = SpiderSurfaceElevated, labelColor = TextSecondary)
-                                )
-                            }
-                        }
-                    }
-                    val fc = adminFieldColors()
-                    OutlinedTextField(
-                        value = placement,
-                        onValueChange = { placement = it.filter { c -> c.isDigit() } },
-                        label = { Text("Placement #") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        colors = fc,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = kills,
-                        onValueChange = { kills = it.filter { c -> c.isDigit() } },
-                        label = { Text("Verified Kills") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        colors = fc,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    if (tour.perKillReward > 0.0) {
-                        val killBonus = (kills.toLongOrNull() ?: 0L) * tour.perKillReward
-                        OutlinedButton(
-                            onClick = {
-                                reward = if (killBonus % 1.0 == 0.0) killBonus.toInt().toString() else killBonus.toString()
-                            },
-                            border = BorderStroke(1.dp, SpiderGold.copy(alpha = 0.6f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                "Use Kill Reward (+${killBonus.toInt()} Coins)",
-                                color = SpiderGold,
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                        }
-                    }
-                    OutlinedTextField(
-                        value = reward,
-                        onValueChange = { reward = it.filterDecimalInput() },
-                        label = { Text("Reward Coins") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        colors = fc,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Text("Leaderboard Mode", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-                    Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("SOLO", "DUO", "LONE_WOLF", "CLASH_SQUAD").forEach { m ->
-                            FilterChip(
-                                selected = mode == m,
-                                onClick = { mode = m },
-                                label = { Text(m, style = MaterialTheme.typography.labelSmall) },
-                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = SpiderRed, selectedLabelColor = Color.White, containerColor = SpiderSurfaceElevated, labelColor = TextSecondary)
-                            )
-                        }
-                    }
-                }
+        val latestTour = tournaments.firstOrNull { it.id == tour.id } ?: tour
+        AdminTournamentResultsDialog(
+            tournament = latestTour,
+            users = users,
+            registrations = registrations,
+            results = results,
+            onDismiss = { resultTarget = null },
+            onSavePosition = { playerName, linkedUser, placement, kills, rewardCoins, mode, onDone ->
+                adminViewModel.verifyResult(
+                    tournamentId = latestTour.id,
+                    tournamentTitle = latestTour.title,
+                    playerName = playerName,
+                    user = linkedUser,
+                    placement = placement,
+                    kills = kills,
+                    rewardCoins = rewardCoins,
+                    leaderboardMode = mode,
+                    onDone = onDone
+                )
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        selectedUser?.let { u ->
-                            adminViewModel.verifyResult(
-                                tour.id, tour.title, u,
-                                placement.toLongOrNull() ?: 1L,
-                                kills.toLongOrNull() ?: 0L,
-                                reward.toDoubleOrNull() ?: 0.0,
-                                mode
-                            )
-                        }
-                        resultTarget = null
-                    },
-                    enabled = selectedUser != null,
-                    colors = ButtonDefaults.buttonColors(containerColor = SpiderRed)
-                ) { Text("Verify & Rank") }
+            onClearPosition = { placement, existingId ->
+                adminViewModel.clearResultPosition(latestTour.id, placement, existingId)
             },
-            dismissButton = { TextButton(onClick = { resultTarget = null }) { Text("Cancel", color = TextSecondary) } }
+            onMarkCompleted = {
+                adminViewModel.markTournamentCompleted(latestTour)
+            }
         )
     }
 }

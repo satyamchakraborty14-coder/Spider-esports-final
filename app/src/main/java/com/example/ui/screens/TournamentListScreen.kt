@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -56,6 +57,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.model.MatchResult
 import com.example.model.Registration
 import com.example.model.Tournament
 import com.example.model.TournamentCategory
@@ -86,6 +88,8 @@ fun TournamentListScreen(
     category: TournamentCategory?,
     tournamentsState: UiState<List<Tournament>>,
     registrations: List<Registration>,
+    results: List<MatchResult> = emptyList(),
+    currentUserId: String = "",
     profile: UserProfile?,
     wallet: Wallet,
     onBack: () -> Unit,
@@ -95,6 +99,7 @@ fun TournamentListScreen(
     var selectedSort by remember { mutableStateOf(TournamentSort.STARTING_SOON) }
     var sortExpanded by remember { mutableStateOf(false) }
     var activeJoinTournament by remember { mutableStateOf<Tournament?>(null) }
+    var activeResultsTournament by remember { mutableStateOf<Tournament?>(null) }
 
     val registeredIds = remember(registrations) { registrations.map { it.tournamentId }.toSet() }
 
@@ -208,10 +213,15 @@ fun TournamentListScreen(
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         items(filtered, key = { it.id }) { tour ->
+                            val tourResultCount = remember(results, tour.id) {
+                                results.count { it.tournamentId == tour.id }
+                            }
                             TournamentDetailCard(
                                 tournament = tour,
                                 isRegistered = tour.id in registeredIds,
-                                onJoinClick = { activeJoinTournament = tour }
+                                resultCount = tourResultCount,
+                                onJoinClick = { activeJoinTournament = tour },
+                                onViewResults = { activeResultsTournament = tour }
                             )
                         }
                     }
@@ -235,22 +245,34 @@ fun TournamentListScreen(
             }
         )
     }
+
+    activeResultsTournament?.let { tour ->
+        TournamentResultsSheetDialog(
+            tournament = tour,
+            results = results,
+            currentUserId = currentUserId,
+            onDismiss = { activeResultsTournament = null }
+        )
+    }
 }
 
 @Composable
 private fun TournamentDetailCard(
     tournament: Tournament,
     isRegistered: Boolean,
-    onJoinClick: () -> Unit
+    resultCount: Int = 0,
+    onJoinClick: () -> Unit,
+    onViewResults: () -> Unit
 ) {
     val maxP = tournament.maxParticipants.coerceAtLeast(1L)
     val progress = (tournament.registeredCount.toFloat() / maxP.toFloat()).coerceIn(0f, 1f)
     val slotsLeft = (tournament.maxParticipants - tournament.registeredCount).coerceAtLeast(0L)
+    val isCompleted = tournament.status == "COMPLETED"
 
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = SpiderCardDark,
-        border = BorderStroke(1.dp, SpiderCardBorder),
+        border = BorderStroke(1.dp, if (isCompleted) SpiderGold.copy(alpha = 0.55f) else SpiderCardBorder),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column {
@@ -258,6 +280,8 @@ private fun TournamentDetailCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(136.dp)
+                    .let { m -> if (isCompleted) m.clickable(onClick = onViewResults) else m }
+                    .testTag("tournament_banner_${tournament.id}")
             ) {
                 SpiderArtworkImage(
                     imageUrl = tournament.bannerUrl,
@@ -286,7 +310,10 @@ private fun TournamentDetailCard(
                         .align(Alignment.TopEnd)
                         .padding(10.dp)
                 ) {
-                    StatusPill(text = tournament.status, color = statusColor(tournament.status))
+                    StatusPill(
+                        text = if (isCompleted) "TAP FOR RESULTS" else tournament.status,
+                        color = if (isCompleted) SpiderGold else statusColor(tournament.status)
+                    )
                 }
                 Column(
                     modifier = Modifier
@@ -313,7 +340,7 @@ private fun TournamentDetailCard(
 
                 LinearProgressIndicator(
                     progress = { progress },
-                    color = SpiderRed,
+                    color = if (isCompleted) SpiderGold else SpiderRed,
                     trackColor = SpiderSurfaceElevated,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -337,26 +364,53 @@ private fun TournamentDetailCard(
                     }
                 }
 
-                Button(
-                    onClick = onJoinClick,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isRegistered) SpiderEmerald else SpiderRed,
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(46.dp)
-                        .testTag("join_tournament_${tournament.id}")
-                ) {
-                    Text(
-                        text = when {
-                            isRegistered -> "ALREADY REGISTERED • VIEW DETAILS"
-                            slotsLeft == 0L -> "TOURNAMENT FULL"
-                            else -> "JOIN TOURNAMENT"
-                        },
-                        style = MaterialTheme.typography.labelLarge
-                    )
+                if (isCompleted) {
+                    Button(
+                        onClick = onViewResults,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = SpiderGold,
+                            contentColor = SpiderBlack
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("view_results_tournament_${tournament.id}")
+                    ) {
+                        Icon(Icons.Filled.EmojiEvents, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = if (resultCount > 0) {
+                                "VIEW RESULTS & RANKS ($resultCount/48)"
+                            } else {
+                                "VIEW RESULTS & RANKS (1–48)"
+                            },
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                } else {
+                    Button(
+                        onClick = onJoinClick,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isRegistered) SpiderEmerald else SpiderRed,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("join_tournament_${tournament.id}")
+                    ) {
+                        Text(
+                            text = when {
+                                isRegistered -> "ALREADY REGISTERED • VIEW DETAILS"
+                                slotsLeft == 0L -> "TOURNAMENT FULL"
+                                else -> "JOIN TOURNAMENT"
+                            },
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
                 }
             }
         }

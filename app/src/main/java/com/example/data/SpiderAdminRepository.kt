@@ -5,6 +5,7 @@ import com.example.model.Announcement
 import com.example.model.AuditLog
 import com.example.model.CustomTournamentType
 import com.example.model.Dispute
+import com.example.model.MatchResult
 import com.example.model.PaymentOrder
 import com.example.model.PayoutRequest
 import com.example.model.PromoBanner
@@ -226,6 +227,14 @@ class SpiderAdminRepository(
                 snap.toObjects(AdminUserRecord::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
             }
             .catch { logAndRethrow(it, OperationType.LIST, "adminUsers", adminUid) }
+
+    fun observeAllResults(adminUid: String): Flow<List<MatchResult>> =
+        db.collection("results").snapshots()
+            .map { snap ->
+                snap.toObjects(MatchResult::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                    .sortedWith(compareBy<MatchResult> { it.tournamentId }.thenBy { it.placement })
+            }
+            .catch { logAndRethrow(it, OperationType.LIST, "results", adminUid) }
 
     suspend fun saveCategory(
         existingId: String?,
@@ -974,147 +983,198 @@ class SpiderAdminRepository(
         }.await()
     }
 
+    private fun roundCoins(value: Double): Double = kotlin.math.round(value * 100.0) / 100.0
+
+    private fun placementPoints(placement: Long): Long = when (placement) {
+        1L -> 100L
+        2L -> 60L
+        3L -> 40L
+        in 4L..10L -> 25L
+        else -> 15L
+    }
+
     suspend fun verifyMatchResultAndRank(
         tournamentId: String,
         tournamentTitle: String,
-        targetUser: UserProfile,
+        playerName: String,
+        targetUser: UserProfile?,
         placement: Long,
         kills: Long,
         rewardCoins: Double,
         leaderboardMode: String
     ): Result<Unit> = runAdminMutation("results") { uid, email ->
-        val resId = "${tournamentId}_${targetUser.userId}"
+        val cleanName = playerName.trim().take(40)
+        require(cleanName.isNotEmpty()) { "Player name is required." }
+        val cleanPlacement = placement.coerceIn(1L, 500L)
+        val cleanKills = kills.coerceIn(0L, 200L)
+        val cleanReward = roundCoins(rewardCoins.coerceAtLeast(0.0))
+        val cleanTitle = tournamentTitle.trim().take(80).let { if (it.length < 2) "Match" else it }
+        val allowedModes = setOf("OVERALL", "WEEKLY", "MONTHLY", "SOLO", "DUO", "LONE_WOLF", "CLASH_SQUAD")
+        val normalizedMode = if (leaderboardMode in allowedModes) leaderboardMode else "SOLO"
+
+        val resId = "${tournamentId}_pos_${cleanPlacement}"
         val resRef = db.collection("results").document(resId)
-        val userRef = db.collection("users").document(targetUser.userId)
-        val walletRef = db.collection("wallets").document(targetUser.userId)
-        val txRef = db.collection("transactions").document("tx_prize_$resId")
-        val notifRef = db.collection("notifications").document("notif_prize_$resId")
         val auditRef = db.collection("auditLogs").document()
 
         db.runTransaction { tx ->
+            // All reads MUST precede all writes in Firestore transactions
             val existingRes = tx.get(resRef)
-            val walletSnap = tx.get(walletRef)
+            val linkedUid = targetUser?.userId?.takeIf { it.isNotBlank() }
+            val userRef = linkedUid?.let { db.collection("users").document(it) }
+            val walletRef = linkedUid?.let { db.collection("wallets").document(it) }
+            val txRef = linkedUid?.let { db.collection("transactions").document("tx_prize_${tournamentId}_$it") }
+            val notifRef = linkedUid?.let { db.collection("notifications").document("notif_prize_${tournamentId}_$it") }
+
+            val userSnap = userRef?.let { tx.get(it) }
+            val walletSnap = walletRef?.let { tx.get(it) }
+            val existingPrizeTx = txRef?.let { tx.get(it) }
+
             val now = FieldValue.serverTimestamp()
-            val pointsEarned = (kills * 10L) + when (placement) {
-                1L -> 100L
-                2L -> 60L
-                3L -> 40L
-                else -> 15L
-            }
+            val pointsEarned = (cleanKills * 10L) + placementPoints(cleanPlacement)
 
             tx.set(
                 resRef,
                 mapOf(
                     "tournamentId" to tournamentId,
-                    "tournamentTitle" to tournamentTitle,
-                    "userId" to targetUser.userId,
-                    "username" to targetUser.username,
-                    "placement" to placement,
-                    "kills" to kills,
-                    "rewardCoins" to rewardCoins,
+                    "tournamentTitle" to cleanTitle,
+                    "userId" to (linkedUid ?: ""),
+                    "username" to cleanName,
+                    "placement" to cleanPlacement,
+                    "kills" to cleanKills,
+                    "rewardCoins" to cleanReward,
                     "verified" to true,
                     "declaredBy" to email,
                     "createdAt" to (existingRes.getTimestamp("createdAt") ?: now),
                     "updatedAt" to now
                 )
             )
-            val newMatches = targetUser.matchesPlayed + 1L
-            val newWins = targetUser.wins + if (placement == 1L) 1L else 0L
-            val newKills = targetUser.verifiedKills + kills
-            val newPoints = targetUser.rankingPoints + pointsEarned
 
-            tx.update(
-                userRef,
-                mapOf(
-                    "matchesPlayed" to newMatches,
-                    "wins" to newWins,
-                    "verifiedKills" to newKills,
-                    "rankingPoints" to newPoints,
-                    "updatedAt" to now
-                )
-            )
+            if (targetUser != null && linkedUid != null && userSnap != null && userSnap.exists() && walletRef != null && walletSnap != null && txRef != null && existingPrizeTx != null && notifRef != null) {
+                val curMatches = userSnap.getLong("matchesPlayed") ?: targetUser.matchesPlayed
+                val curWins = userSnap.getLong("wins") ?: targetUser.wins
+                val curKills = userSnap.getLong("verifiedKills") ?: targetUser.verifiedKills
+                val curPoints = userSnap.getLong("rankingPoints") ?: targetUser.rankingPoints
 
-            listOf("OVERALL", leaderboardMode).distinct().forEach { modeKey ->
-                tx.set(
-                    db.collection("leaderboards").document("${modeKey}_${targetUser.userId}"),
+                val wasSameUser = existingRes.exists() && existingRes.getString("userId") == linkedUid
+                val oldPlacement = if (wasSameUser) (existingRes.getLong("placement") ?: cleanPlacement) else 0L
+                val oldKills = if (wasSameUser) (existingRes.getLong("kills") ?: 0L) else 0L
+                val oldPoints = if (wasSameUser) (oldKills * 10L) + placementPoints(oldPlacement) else 0L
+
+                val newMatches = if (wasSameUser) curMatches else curMatches + 1L
+                val newWins = (curWins - (if (wasSameUser && oldPlacement == 1L) 1L else 0L) + (if (cleanPlacement == 1L) 1L else 0L)).coerceAtLeast(0L)
+                val newKills = (curKills - oldKills + cleanKills).coerceAtLeast(0L)
+                val newPoints = (curPoints - oldPoints + pointsEarned).coerceAtLeast(0L)
+
+                tx.update(
+                    userRef,
                     mapOf(
-                        "userId" to targetUser.userId,
-                        "username" to targetUser.username,
-                        "photoUrl" to targetUser.photoUrl,
-                        "mode" to modeKey,
-                        "matches" to newMatches,
+                        "matchesPlayed" to newMatches,
                         "wins" to newWins,
                         "verifiedKills" to newKills,
                         "rankingPoints" to newPoints,
-                        "verified" to true,
                         "updatedAt" to now
                     )
                 )
-            }
 
-            if (rewardCoins > 0.0 && !existingRes.exists()) {
-                val currentDep = walletSnap.getDouble("depositedBalance") ?: 0.0
-                val currentWin = walletSnap.getDouble("winningBalance") ?: 0.0
-                val currentBonus = if (walletSnap.contains("bonusBalance")) {
-                    walletSnap.getDouble("bonusBalance") ?: 0.0
-                } else {
-                    walletSnap.getDouble("earningsBalance") ?: 0.0
-                }
-                val currentPayout = walletSnap.getDouble("payoutsTotal") ?: 0.0
-                val nextWin = currentWin + rewardCoins
-                val nextTotal = currentDep + nextWin + currentBonus
-
-                if (!walletSnap.exists()) {
+                val lbName = (userSnap.getString("username") ?: targetUser.username).trim().take(32).let { if (it.length < 2) cleanName.take(32).padEnd(2, '_') else it }
+                val lbPhoto = userSnap.getString("photoUrl") ?: targetUser.photoUrl
+                listOf("OVERALL", normalizedMode).distinct().forEach { modeKey ->
                     tx.set(
-                        walletRef,
+                        db.collection("leaderboards").document("${modeKey}_$linkedUid"),
                         mapOf(
-                            "userId" to targetUser.userId,
-                            "totalBalance" to nextTotal,
-                            "depositedBalance" to currentDep,
-                            "winningBalance" to nextWin,
-                            "bonusBalance" to currentBonus,
-                            "earningsBalance" to currentBonus,
-                            "payoutsTotal" to currentPayout,
-                            "createdAt" to now,
-                            "updatedAt" to now
-                        )
-                    )
-                } else {
-                    tx.update(
-                        walletRef,
-                        mapOf(
-                            "totalBalance" to nextTotal,
-                            "winningBalance" to nextWin,
-                            "bonusBalance" to currentBonus,
+                            "userId" to linkedUid,
+                            "username" to lbName,
+                            "photoUrl" to lbPhoto,
+                            "mode" to modeKey,
+                            "matches" to newMatches,
+                            "wins" to newWins,
+                            "verifiedKills" to newKills,
+                            "rankingPoints" to newPoints,
+                            "verified" to true,
                             "updatedAt" to now
                         )
                     )
                 }
-                tx.set(
-                    txRef,
-                    mapOf(
-                        "userId" to targetUser.userId,
-                        "type" to "PRIZE",
-                        "direction" to "CREDIT",
-                        "description" to "Prize for #$placement in $tournamentTitle ($kills kills)".take(200),
-                        "matchId" to tournamentId,
-                        "amount" to rewardCoins,
-                        "status" to "COMPLETED",
-                        "resultingBalance" to nextTotal,
-                        "createdAt" to now
-                    )
-                )
-                tx.set(
-                    notifRef,
-                    mapOf(
-                        "userId" to targetUser.userId,
-                        "title" to "Winning Prize Credited!",
-                        "message" to "+${rewardCoins.toInt()} Winning Coins added for #$placement in $tournamentTitle.",
-                        "type" to "PRIZE",
-                        "read" to false,
-                        "createdAt" to now
-                    )
-                )
+
+                val alreadyCredited = existingPrizeTx.exists()
+                val prevAmount = if (alreadyCredited) (existingPrizeTx.getDouble("amount") ?: 0.0) else 0.0
+                val delta = roundCoins(cleanReward - prevAmount)
+
+                if ((!alreadyCredited && cleanReward > 0.0) || (alreadyCredited && kotlin.math.abs(delta) >= 0.01)) {
+                    val currentDep = walletSnap.getDouble("depositedBalance") ?: 0.0
+                    val currentWin = walletSnap.getDouble("winningBalance") ?: 0.0
+                    val currentBonus = if (walletSnap.contains("bonusBalance")) {
+                        walletSnap.getDouble("bonusBalance") ?: 0.0
+                    } else {
+                        walletSnap.getDouble("earningsBalance") ?: 0.0
+                    }
+                    val currentPayout = walletSnap.getDouble("payoutsTotal") ?: 0.0
+                    val nextWin = roundCoins((currentWin + delta).coerceAtLeast(0.0))
+                    val nextTotal = roundCoins(currentDep + nextWin + currentBonus)
+
+                    if (!walletSnap.exists()) {
+                        tx.set(
+                            walletRef,
+                            mapOf(
+                                "userId" to linkedUid,
+                                "totalBalance" to nextTotal,
+                                "depositedBalance" to currentDep,
+                                "winningBalance" to nextWin,
+                                "bonusBalance" to currentBonus,
+                                "earningsBalance" to currentBonus,
+                                "payoutsTotal" to currentPayout,
+                                "createdAt" to now,
+                                "updatedAt" to now
+                            )
+                        )
+                    } else {
+                        tx.update(
+                            walletRef,
+                            mapOf(
+                                "totalBalance" to nextTotal,
+                                "winningBalance" to nextWin,
+                                "bonusBalance" to currentBonus,
+                                "updatedAt" to now
+                            )
+                        )
+                    }
+                    if (!alreadyCredited) {
+                        tx.set(
+                            txRef,
+                            mapOf(
+                                "userId" to linkedUid,
+                                "type" to "PRIZE",
+                                "direction" to "CREDIT",
+                                "description" to "Prize for #$cleanPlacement in $cleanTitle ($cleanKills kills)".take(200),
+                                "matchId" to tournamentId,
+                                "amount" to cleanReward,
+                                "status" to "COMPLETED",
+                                "resultingBalance" to nextTotal,
+                                "createdAt" to now
+                            )
+                        )
+                        tx.set(
+                            notifRef,
+                            mapOf(
+                                "userId" to linkedUid,
+                                "title" to "Winning Prize Credited!",
+                                "message" to "+${cleanReward.toInt()} Winning Coins added for #$cleanPlacement in $cleanTitle.",
+                                "type" to "PRIZE",
+                                "read" to false,
+                                "createdAt" to now
+                            )
+                        )
+                    } else {
+                        tx.update(
+                            txRef,
+                            mapOf(
+                                "description" to "Prize for #$cleanPlacement in $cleanTitle ($cleanKills kills)".take(200),
+                                "amount" to cleanReward,
+                                "resultingBalance" to nextTotal
+                            )
+                        )
+                    }
+                }
             }
 
             tx.set(
@@ -1125,12 +1185,44 @@ class SpiderAdminRepository(
                     "action" to "VERIFY_RESULT",
                     "targetCollection" to "results",
                     "targetId" to resId,
-                    "summary" to "Verified #$placement ($kills kills, +$rewardCoins Winning Coins) for ${targetUser.username}".take(400),
+                    "summary" to "Position #$cleanPlacement: $cleanName ($cleanKills kills, $cleanReward Coins) in $cleanTitle".take(400),
                     "createdAt" to now
                 )
             )
         }.await()
     }
+
+    suspend fun clearTournamentPositionResult(
+        tournamentId: String,
+        placement: Long,
+        existingResultId: String
+    ): Result<Unit> = runAdminMutation("results") { uid, email ->
+        val docId = existingResultId.ifBlank { "${tournamentId}_pos_${placement}" }
+        val batch = db.batch()
+        batch.delete(db.collection("results").document(docId))
+        appendAudit(
+            batch, uid, email, "CLEAR_RESULT_POS", "results", docId,
+            "Cleared position #$placement result for tournament $tournamentId"
+        )
+        batch.commit().await()
+    }
+
+    suspend fun markTournamentCompleted(tournament: Tournament): Result<Unit> =
+        runAdminMutation("tournaments/${tournament.id}") { uid, email ->
+            val batch = db.batch()
+            batch.update(
+                db.collection("tournaments").document(tournament.id),
+                mapOf(
+                    "status" to "COMPLETED",
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            appendAudit(
+                batch, uid, email, "COMPLETE_TOURNAMENT", "tournaments", tournament.id,
+                "Marked '${tournament.title}' as COMPLETED"
+            )
+            batch.commit().await()
+        }
 
     suspend fun saveAnnouncementOrSupportLinks(
         id: String,

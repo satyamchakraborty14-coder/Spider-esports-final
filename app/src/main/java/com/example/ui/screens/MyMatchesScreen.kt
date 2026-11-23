@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,15 +47,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.model.MatchRecord
 import com.example.model.MatchResult
 import com.example.model.Registration
 import com.example.model.RoomCredential
 import com.example.model.Tournament
+import com.example.ui.components.SpiderArtworkImage
 import com.example.ui.components.SpiderBackTopBar
 import com.example.ui.components.SpiderEmptyState
 import com.example.ui.components.StatusPill
@@ -88,10 +92,33 @@ fun MyMatchesScreen(
     val startIdx = tabs.indexOf(initialTab.uppercase()).let { if (it >= 0) it else 1 }
     var selectedTabIndex by remember { mutableIntStateOf(startIdx) }
     var disputeTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var activeResultsTournament by remember { mutableStateOf<Tournament?>(null) }
 
     val regMap = remember(registrations) { registrations.associateBy { it.tournamentId } }
     val registeredTournaments = remember(tournaments, regMap) {
         tournaments.filter { it.id in regMap.keys }
+    }
+    val tourIdsWithResults = remember(results) { results.map { it.tournamentId }.toSet() }
+    val completedList = remember(tournaments, results, regMap, currentUserId, tourIdsWithResults) {
+        val existingCompleted = tournaments.filter { it.status == "COMPLETED" || it.id in tourIdsWithResults }
+        val knownIds = existingCompleted.map { it.id }.toSet()
+        val synthetic = results
+            .filter { it.tournamentId !in knownIds }
+            .groupBy { it.tournamentId }
+            .map { (tid, list) ->
+                Tournament(
+                    id = tid,
+                    title = list.firstOrNull()?.tournamentTitle ?: "Completed Match",
+                    gameMode = "MATCH",
+                    mapName = "Arena",
+                    status = "COMPLETED",
+                    maxParticipants = 48L
+                )
+            }
+        (existingCompleted + synthetic).sortedByDescending { t ->
+            val isUserIn = (t.id in regMap) || results.any { it.tournamentId == t.id && it.userId == currentUserId }
+            if (isUserIn) 1 else 0
+        }
     }
 
     Column(
@@ -182,68 +209,51 @@ fun MyMatchesScreen(
                     }
                 }
                 "COMPLETED" -> {
-                    val userResults = results.filter { it.userId == currentUserId }
-                    val completedTours = registeredTournaments.filter { it.status == "COMPLETED" }
-                    if (userResults.isEmpty() && completedTours.isEmpty()) {
+                    if (completedList.isEmpty()) {
                         item {
                             SpiderEmptyState(
                                 title = "No Completed Matches Yet",
-                                subtitle = "Verified winners, kills, and rewards appear here after admin result verification."
+                                subtitle = "Completed match banners and full 1–48 player results appear here once verified by Admin."
                             )
                         }
                     } else {
-                        items(userResults, key = { it.id }) { res ->
-                            Surface(
-                                shape = RoundedCornerShape(14.dp),
-                                color = SpiderCardDark,
-                                border = BorderStroke(1.dp, SpiderCardBorder),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(res.tournamentTitle, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                                        StatusPill(text = "#${res.placement} PLACE", color = SpiderGold)
-                                    }
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text("Kills: ${res.kills}", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(Icons.Filled.EmojiEvents, null, tint = SpiderEmerald, modifier = Modifier.size(16.dp))
-                                            Spacer(Modifier.width(4.dp))
-                                            Text("Reward: ${res.rewardCoins.toInt()} Coins", style = MaterialTheme.typography.titleSmall, color = SpiderEmerald)
-                                        }
-                                    }
-                                    OutlinedButton(
-                                        onClick = { disputeTarget = res.tournamentId to res.tournamentTitle },
-                                        border = BorderStroke(1.dp, SpiderCardBorder),
-                                        shape = RoundedCornerShape(10.dp)
-                                    ) {
-                                        Icon(Icons.Filled.ReportProblem, null, tint = SpiderRedBright, modifier = Modifier.size(16.dp))
-                                        Spacer(Modifier.width(6.dp))
-                                        Text("Raise Score Dispute", color = TextPrimary)
-                                    }
-                                }
+                        items(completedList, key = { "comp_${it.id}" }) { tour ->
+                            val tourResults = remember(results, tour.id) { results.filter { it.tournamentId == tour.id } }
+                            val myRes = remember(tourResults, currentUserId) {
+                                tourResults.firstOrNull { it.userId == currentUserId }
                             }
-                        }
-                        items(completedTours, key = { "ct_${it.id}" }) { tour ->
-                            RegisteredMatchCard(
+                            val isJoined = tour.id in regMap
+                            CompletedBannerCard(
                                 tournament = tour,
-                                registration = regMap[tour.id],
-                                credential = null,
-                                onFetchRoom = {},
-                                onRaiseDispute = { disputeTarget = tour.id to tour.title }
+                                rankedCount = tourResults.size,
+                                myResult = myRes,
+                                isJoined = isJoined,
+                                onOpenResults = { activeResultsTournament = tour },
+                                onRaiseDispute = if (isJoined || myRes != null) {
+                                    { disputeTarget = tour.id to tour.title }
+                                } else null
                             )
                         }
                     }
                 }
             }
         }
+    }
+
+    activeResultsTournament?.let { tour ->
+        val isJoinedOrPlaced = (tour.id in regMap) || results.any { it.tournamentId == tour.id && it.userId == currentUserId }
+        TournamentResultsSheetDialog(
+            tournament = tour,
+            results = results,
+            currentUserId = currentUserId,
+            onDismiss = { activeResultsTournament = null },
+            onRaiseDispute = if (isJoinedOrPlaced) {
+                {
+                    activeResultsTournament = null
+                    disputeTarget = tour.id to tour.title
+                }
+            } else null
+        )
     }
 
     disputeTarget?.let { (tourId, title) ->
@@ -372,3 +382,151 @@ private fun RegisteredMatchCard(
         }
     }
 }
+
+@Composable
+fun CompletedBannerCard(
+    tournament: Tournament,
+    rankedCount: Int,
+    myResult: MatchResult? = null,
+    isJoined: Boolean = false,
+    onOpenResults: () -> Unit,
+    onRaiseDispute: (() -> Unit)? = null
+) {
+    Surface(
+        onClick = onOpenResults,
+        shape = RoundedCornerShape(16.dp),
+        color = SpiderCardDark,
+        border = BorderStroke(1.dp, SpiderGold.copy(alpha = 0.55f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("completed_banner_${tournament.id}")
+    ) {
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(124.dp)
+                    .clickable(onClick = onOpenResults)
+            ) {
+                SpiderArtworkImage(
+                    imageUrl = tournament.bannerUrl,
+                    presetKey = tournament.presetKey,
+                    contentDescription = tournament.title,
+                    modifier = Modifier.fillMaxSize()
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(listOf(Color.Transparent, SpiderBlack.copy(alpha = 0.94f)))
+                        )
+                )
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    StatusPill(text = tournament.gameMode, color = SpiderRedBright)
+                    if (tournament.mapName.isNotBlank()) {
+                        StatusPill(text = tournament.mapName, color = TextPrimary)
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(10.dp)
+                ) {
+                    StatusPill(text = "TAP FOR 1–48 RESULTS", color = SpiderGold)
+                }
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(12.dp)
+                ) {
+                    Text(
+                        text = tournament.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "${tournament.matchDate} ${tournament.matchTime} • Prize: ${tournament.prizePool.toInt()} Coins • Per Kill: ${tournament.perKillReward.toInt()} Coins",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (myResult != null) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = SpiderEmerald.copy(alpha = 0.14f),
+                        border = BorderStroke(1.dp, SpiderEmerald.copy(alpha = 0.55f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Your Rank #${myResult.placement} • ${myResult.kills} Kills",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = SpiderEmerald
+                            )
+                            Text(
+                                text = "+${myResult.rewardCoins.toInt()} Coins Won",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = SpiderGold,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                } else if (isJoined) {
+                    Text(
+                        text = "You joined this match • Tap banner to inspect all 48 positions",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = SpiderEmerald
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = onOpenResults,
+                        colors = ButtonDefaults.buttonColors(containerColor = SpiderGold, contentColor = SpiderBlack),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(1f).height(44.dp)
+                    ) {
+                        Icon(Icons.Filled.EmojiEvents, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = if (rankedCount > 0) "VIEW FULL LIST ($rankedCount/48)" else "VIEW FULL LIST (1–48)",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    if (onRaiseDispute != null) {
+                        OutlinedButton(
+                            onClick = onRaiseDispute,
+                            border = BorderStroke(1.dp, SpiderCardBorder),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.height(44.dp)
+                        ) {
+                            Icon(Icons.Filled.ReportProblem, "Dispute", tint = SpiderRedBright, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

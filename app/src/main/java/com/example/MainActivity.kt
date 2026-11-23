@@ -423,6 +423,8 @@ private fun SpiderAppShell(currentUserId: String) {
                                 announcements = announcements,
                                 matches = matches,
                                 registrations = registrations,
+                                results = results,
+                                currentUserId = currentUserId,
                                 onLanguageChange = mainViewModel::setLanguage,
                                 onSupportClick = { navController.navigate(AppRoutes.SUPPORT) },
                                 onWalletClick = { navigateTopTab(BottomNavTab.WALLET) },
@@ -469,7 +471,12 @@ private fun SpiderAppShell(currentUserId: String) {
                         }
 
                         composable(AppRoutes.RANKING) {
-                            RankingScreen(leaderboardsState = leaderboardsState)
+                            RankingScreen(
+                                leaderboardsState = leaderboardsState,
+                                tournamentsState = tournamentsState,
+                                results = results,
+                                currentUserId = currentUserId
+                            )
                         }
 
                         composable(AppRoutes.WALLET) {
@@ -512,6 +519,8 @@ private fun SpiderAppShell(currentUserId: String) {
                                 category = cat,
                                 tournamentsState = tournamentsState,
                                 registrations = registrations,
+                                results = results,
+                                currentUserId = currentUserId,
                                 profile = profile,
                                 wallet = wallet,
                                 onBack = { navController.popBackStack() },

@@ -11,6 +11,7 @@ import com.example.model.Announcement
 import com.example.model.AuditLog
 import com.example.model.CustomTournamentType
 import com.example.model.Dispute
+import com.example.model.MatchResult
 import com.example.model.PaymentOrder
 import com.example.model.PayoutRequest
 import com.example.model.PromoBanner
@@ -71,6 +72,7 @@ class SpiderAdminViewModel(
     val auditLogs: StateFlow<List<AuditLog>> = adminRepo.observeAuditLogs(adminUid).safeList("auditLogs")
     val referrals: StateFlow<List<ReferralRecord>> = adminRepo.observeAllReferrals(adminUid).safeList("referrals")
     val adminUsers: StateFlow<List<AdminUserRecord>> = adminRepo.observeAllAdminUsers(adminUid).safeList("adminUsers")
+    val results: StateFlow<List<MatchResult>> = adminRepo.observeAllResults(adminUid).safeList("results")
 
     fun clearStatus() {
         _statusMessage.value = null
@@ -281,20 +283,49 @@ class SpiderAdminViewModel(
     fun verifyResult(
         tournamentId: String,
         tournamentTitle: String,
-        user: UserProfile,
+        playerName: String,
+        user: UserProfile?,
         placement: Long,
         kills: Long,
         rewardCoins: Double,
-        leaderboardMode: String
+        leaderboardMode: String,
+        onDone: (Boolean, String?) -> Unit = { _, _ -> }
     ) {
         viewModelScope.launch {
             adminRepo.verifyMatchResultAndRank(
-                tournamentId, tournamentTitle, user, placement, kills, rewardCoins, leaderboardMode
+                tournamentId = tournamentId,
+                tournamentTitle = tournamentTitle,
+                playerName = playerName,
+                targetUser = user,
+                placement = placement,
+                kills = kills,
+                rewardCoins = rewardCoins,
+                leaderboardMode = leaderboardMode
             ).onSuccess {
-                _statusMessage.value = true to "Verified result & ranking points for ${user.username}."
+                val msg = "Saved #$placement: $playerName ($kills kills, ${rewardCoins.toInt()} Coins)"
+                _statusMessage.value = true to msg
+                onDone(true, msg)
             }.onFailure {
-                _statusMessage.value = false to (it.localizedMessage ?: "Verification failed")
+                val err = it.localizedMessage ?: "Verification failed"
+                _statusMessage.value = false to err
+                onDone(false, err)
             }
+        }
+    }
+
+    fun clearResultPosition(tournamentId: String, placement: Long, existingResultId: String) {
+        viewModelScope.launch {
+            adminRepo.clearTournamentPositionResult(tournamentId, placement, existingResultId)
+                .onSuccess { _statusMessage.value = true to "Cleared position #$placement." }
+                .onFailure { _statusMessage.value = false to (it.localizedMessage ?: "Failed to clear position") }
+        }
+    }
+
+    fun markTournamentCompleted(tournament: Tournament) {
+        viewModelScope.launch {
+            adminRepo.markTournamentCompleted(tournament)
+                .onSuccess { _statusMessage.value = true to "'${tournament.title}' marked COMPLETED." }
+                .onFailure { _statusMessage.value = false to (it.localizedMessage ?: "Failed to mark completed") }
         }
     }
 

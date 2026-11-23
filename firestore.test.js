@@ -473,3 +473,68 @@ test("Coin tournament: multi-bucket deduction (deposit + bonus + winning) succee
     })
   );
 });
+
+test("Results 1-48: admin can write linked and manual position results; users can read verified list but cannot write", async () => {
+  await seedUserAndTournament({ entryFee: 0, seedWallet: false });
+  const adminDb = dbForUser("admin_uid_1", "satyamchakraborty14@gmail.com");
+  const aliceDb = dbForUser(ALICE_UID, "alice@gmail.com");
+  const now = new Date(Date.now() - 1000);
+
+  // Position #1 linked to Alice
+  await assertSucceeds(
+    adminDb.collection("results").doc("tour_coin_1_pos_1").set({
+      tournamentId: "tour_coin_1",
+      tournamentTitle: "Full Map Coin Clash",
+      userId: ALICE_UID,
+      username: "AliceFF",
+      placement: 1,
+      kills: 11,
+      rewardCoins: 250,
+      verified: true,
+      declaredBy: "satyamchakraborty14@gmail.com",
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
+  // Position #48 manual player name (unlinked userId = "")
+  await assertSucceeds(
+    adminDb.collection("results").doc("tour_coin_1_pos_48").set({
+      tournamentId: "tour_coin_1",
+      tournamentTitle: "Full Map Coin Clash",
+      userId: "",
+      username: "SquadSlot48",
+      placement: 48,
+      kills: 0,
+      rewardCoins: 0,
+      verified: true,
+      declaredBy: "satyamchakraborty14@gmail.com",
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
+  // Regular user can list verified results to view all 48 positions
+  await assertSucceeds(
+    aliceDb.collection("results").where("verified", "==", true).get()
+  );
+
+  // Regular user cannot create or modify results
+  await assertFails(
+    aliceDb.collection("results").doc("tour_coin_1_pos_2").set({
+      tournamentId: "tour_coin_1",
+      tournamentTitle: "Full Map Coin Clash",
+      userId: ALICE_UID,
+      username: "AliceFF",
+      placement: 2,
+      kills: 5,
+      rewardCoins: 999,
+      verified: true,
+      declaredBy: "alice@gmail.com",
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+  await assertFails(adminDb.collection("results").doc("tour_coin_1_pos_48").delete().then(() => aliceDb.collection("results").doc("tour_coin_1_pos_1").delete()));
+});
+

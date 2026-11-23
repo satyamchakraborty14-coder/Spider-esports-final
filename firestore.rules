@@ -222,8 +222,8 @@ service cloud.firestore {
     function isValidResult(data) {
       return data.tournamentId is string && data.tournamentId.size() >= 1 && data.tournamentId.size() <= 128 &&
              data.tournamentTitle is string && data.tournamentTitle.size() >= 2 && data.tournamentTitle.size() <= 80 &&
-             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
-             data.username is string && data.username.size() >= 2 && data.username.size() <= 32 &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.username is string && data.username.size() >= 1 && data.username.size() <= 40 &&
              data.placement is int && data.placement >= 1 && data.placement <= 500 &&
              data.kills is int && data.kills >= 0 && data.kills <= 200 &&
              data.rewardCoins is number && data.rewardCoins >= 0 &&

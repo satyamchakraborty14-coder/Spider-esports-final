@@ -7,6 +7,7 @@ import android.content.Intent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -42,13 +44,13 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -63,7 +65,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.model.Announcement
 import com.example.model.LeaderboardEntry
+import com.example.model.MatchResult
 import com.example.model.ReferralRecord
+import com.example.model.Tournament
 import com.example.model.UiState
 import com.example.model.UserProfile
 import com.example.model.WalletTransaction
@@ -360,7 +364,10 @@ fun EarnScreen(
 
 @Composable
 fun RankingScreen(
-    leaderboardsState: UiState<List<LeaderboardEntry>>
+    leaderboardsState: UiState<List<LeaderboardEntry>>,
+    tournamentsState: UiState<List<Tournament>> = UiState.Success(emptyList()),
+    results: List<MatchResult> = emptyList(),
+    currentUserId: String = ""
 ) {
     val modes = listOf(
         "OVERALL" to "Overall",
@@ -371,7 +378,9 @@ fun RankingScreen(
         "LONE_WOLF" to "Lone Wolf",
         "CLASH_SQUAD" to "Clash Squad"
     )
+    var selectedSection by remember { mutableIntStateOf(0) } // 0 = Player Ranking, 1 = Match Results (1-48)
     var selectedMode by remember { mutableStateOf("OVERALL") }
+    var activeResultsTournament by remember { mutableStateOf<Tournament?>(null) }
 
     Column(
         modifier = Modifier
@@ -387,124 +396,161 @@ fun RankingScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column {
-                Text("RANKING", style = MaterialTheme.typography.headlineMedium, color = TextPrimary)
-                Text("Only verified match results affect rankings", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                Text("RANKING & RESULTS", style = MaterialTheme.typography.headlineMedium, color = TextPrimary)
+                Text("Verified leaderboards & full 1–48 match results", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
             }
             Icon(Icons.Filled.EmojiEvents, null, tint = SpiderGold, modifier = Modifier.size(28.dp))
         }
 
+        // Section switcher: Player Ranking vs Match Results (1-48)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 14.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(horizontal = 14.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(SpiderCardDark)
+                .border(1.dp, SpiderCardBorder, RoundedCornerShape(12.dp))
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            modes.forEach { (key, label) ->
-                val active = selectedMode == key
-                FilterChip(
-                    selected = active,
-                    onClick = { selectedMode = key },
-                    label = { Text(label, style = MaterialTheme.typography.labelMedium) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = SpiderRed,
-                        selectedLabelColor = Color.White,
-                        containerColor = SpiderCardDark,
-                        labelColor = TextSecondary
-                    ),
-                    border = FilterChipDefaults.filterChipBorder(
-                        enabled = true,
-                        selected = active,
-                        borderColor = SpiderCardBorder,
-                        selectedBorderColor = SpiderRed
+            listOf("PLAYER RANKING", "MATCH RESULTS (1–48)").forEachIndexed { idx, label ->
+                val selected = selectedSection == idx
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(if (selected) SpiderRed else SpiderSurfaceElevated)
+                        .clickable { selectedSection = idx }
+                        .padding(vertical = 10.dp)
+                        .testTag(if (idx == 0) "ranking_tab_players" else "ranking_tab_match_results"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (selected) Color.White else TextSecondary,
+                        fontWeight = FontWeight.Bold
                     )
-                )
+                }
             }
         }
 
-        when (leaderboardsState) {
-            is UiState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = SpiderRed)
-            }
-            is UiState.Error -> Box(Modifier.padding(16.dp)) {
-                SpiderEmptyState(title = "Unable to load rankings", subtitle = leaderboardsState.message)
-            }
-            is UiState.Success -> {
-                val filtered = remember(leaderboardsState.data, selectedMode) {
-                    leaderboardsState.data
-                        .filter { it.mode == selectedMode && it.verified }
-                        .sortedByDescending { it.rankingPoints }
-                }
-                if (filtered.isEmpty()) {
-                    Box(Modifier.padding(16.dp)) {
-                        SpiderEmptyState(
-                            title = "No Verified Rankings Yet",
-                            subtitle = "Rankings populate automatically as Admins verify tournament match results."
+        Spacer(Modifier.height(8.dp))
+
+        if (selectedSection == 0) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 14.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                modes.forEach { (key, label) ->
+                    val active = selectedMode == key
+                    FilterChip(
+                        selected = active,
+                        onClick = { selectedMode = key },
+                        label = { Text(label, style = MaterialTheme.typography.labelMedium) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = SpiderRed,
+                            selectedLabelColor = Color.White,
+                            containerColor = SpiderCardDark,
+                            labelColor = TextSecondary
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = active,
+                            borderColor = SpiderCardBorder,
+                            selectedBorderColor = SpiderRed
                         )
+                    )
+                }
+            }
+
+            when (leaderboardsState) {
+                is UiState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = SpiderRed)
+                }
+                is UiState.Error -> Box(Modifier.padding(16.dp)) {
+                    SpiderEmptyState(title = "Unable to load rankings", subtitle = leaderboardsState.message)
+                }
+                is UiState.Success -> {
+                    val filtered = remember(leaderboardsState.data, selectedMode) {
+                        leaderboardsState.data
+                            .filter { it.mode == selectedMode && it.verified }
+                            .sortedByDescending { it.rankingPoints }
                     }
-                } else {
-                    LazyColumn(
-                        contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 100.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        itemsIndexed(filtered, key = { idx, item -> "${item.id}_$idx" }) { index, entry ->
-                            val rank = index + 1
-                            val rankColor = when (rank) {
-                                1 -> SpiderGold
-                                2 -> SpiderSilver
-                                3 -> SpiderBronze
-                                else -> TextMuted
-                            }
-                            Surface(
-                                shape = RoundedCornerShape(14.dp),
-                                color = SpiderCardDark,
-                                border = BorderStroke(1.dp, if (rank <= 3) rankColor.copy(alpha = 0.55f) else SpiderCardBorder),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                    if (filtered.isEmpty()) {
+                        Box(Modifier.padding(16.dp)) {
+                            SpiderEmptyState(
+                                title = "No Verified Rankings Yet",
+                                subtitle = "Rankings populate automatically as Admins verify tournament match results."
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 100.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            itemsIndexed(filtered, key = { idx, item -> "${item.id}_$idx" }) { index, entry ->
+                                val rank = index + 1
+                                val rankColor = when (rank) {
+                                    1 -> SpiderGold
+                                    2 -> SpiderSilver
+                                    3 -> SpiderBronze
+                                    else -> TextMuted
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = SpiderCardDark,
+                                    border = BorderStroke(1.dp, if (rank <= 3) rankColor.copy(alpha = 0.55f) else SpiderCardBorder),
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(34.dp)
-                                            .clip(CircleShape)
-                                            .background(rankColor.copy(alpha = 0.18f))
-                                            .border(1.dp, rankColor, CircleShape),
-                                        contentAlignment = Alignment.Center
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text("#$rank", style = MaterialTheme.typography.labelLarge, color = rankColor)
-                                    }
-                                    Spacer(Modifier.width(10.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .clip(CircleShape)
-                                            .background(SpiderSurfaceElevated)
-                                    ) {
-                                        SpiderArtworkImage(
-                                            imageUrl = entry.photoUrl,
-                                            presetKey = "logo",
-                                            contentDescription = entry.username,
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-                                    }
-                                    Spacer(Modifier.width(10.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(entry.username, style = MaterialTheme.typography.titleSmall, color = TextPrimary)
-                                            Spacer(Modifier.width(4.dp))
-                                            Icon(Icons.Filled.Verified, null, tint = SpiderEmerald, modifier = Modifier.size(14.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .size(34.dp)
+                                                .clip(CircleShape)
+                                                .background(rankColor.copy(alpha = 0.18f))
+                                                .border(1.dp, rankColor, CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text("#$rank", style = MaterialTheme.typography.labelLarge, color = rankColor)
                                         }
-                                        Text(
-                                            "Matches: ${entry.matches} • Wins: ${entry.wins} • Kills: ${entry.verifiedKills}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = TextSecondary
-                                        )
-                                    }
-                                    Column(horizontalAlignment = Alignment.End) {
-                                        Text("${entry.rankingPoints}", style = MaterialTheme.typography.titleMedium, color = SpiderRedBright, fontWeight = FontWeight.Bold)
-                                        Text("PTS", style = MaterialTheme.typography.labelSmall, color = TextMuted)
+                                        Spacer(Modifier.width(10.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .clip(CircleShape)
+                                                .background(SpiderSurfaceElevated)
+                                        ) {
+                                            SpiderArtworkImage(
+                                                imageUrl = entry.photoUrl,
+                                                presetKey = "logo",
+                                                contentDescription = entry.username,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        }
+                                        Spacer(Modifier.width(10.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(entry.username, style = MaterialTheme.typography.titleSmall, color = TextPrimary)
+                                                Spacer(Modifier.width(4.dp))
+                                                Icon(Icons.Filled.Verified, null, tint = SpiderEmerald, modifier = Modifier.size(14.dp))
+                                            }
+                                            Text(
+                                                "Matches: ${entry.matches} • Wins: ${entry.wins} • Kills: ${entry.verifiedKills}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = TextSecondary
+                                            )
+                                        }
+                                        Column(horizontalAlignment = Alignment.End) {
+                                            Text("${entry.rankingPoints}", style = MaterialTheme.typography.titleMedium, color = SpiderRedBright, fontWeight = FontWeight.Bold)
+                                            Text("PTS", style = MaterialTheme.typography.labelSmall, color = TextMuted)
+                                        }
                                     }
                                 }
                             }
@@ -512,6 +558,64 @@ fun RankingScreen(
                     }
                 }
             }
+        } else {
+            val allTours = (tournamentsState as? UiState.Success)?.data.orEmpty()
+            val tourIdsWithResults = remember(results) { results.map { it.tournamentId }.toSet() }
+            val completedTours = remember(allTours, results, tourIdsWithResults) {
+                val existing = allTours.filter { it.status == "COMPLETED" || it.id in tourIdsWithResults }
+                val knownIds = existing.map { it.id }.toSet()
+                val synthetic = results
+                    .filter { it.tournamentId !in knownIds }
+                    .groupBy { it.tournamentId }
+                    .map { (tid, list) ->
+                        Tournament(
+                            id = tid,
+                            title = list.firstOrNull()?.tournamentTitle ?: "Completed Match",
+                            gameMode = "MATCH",
+                            mapName = "Arena",
+                            status = "COMPLETED",
+                            maxParticipants = 48L
+                        )
+                    }
+                existing + synthetic
+            }
+
+            if (completedTours.isEmpty()) {
+                Box(Modifier.padding(16.dp)) {
+                    SpiderEmptyState(
+                        title = "No Match Results Published Yet",
+                        subtitle = "Tap any completed match banner here to see all 1–48 player names, kills, and prize coins won."
+                    )
+                }
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 100.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(completedTours, key = { "rank_res_${it.id}" }) { tour ->
+                        val tourResults = remember(results, tour.id) { results.filter { it.tournamentId == tour.id } }
+                        val myRes = remember(tourResults, currentUserId) {
+                            tourResults.firstOrNull { it.userId == currentUserId }
+                        }
+                        CompletedBannerCard(
+                            tournament = tour,
+                            rankedCount = tourResults.size,
+                            myResult = myRes,
+                            isJoined = myRes != null,
+                            onOpenResults = { activeResultsTournament = tour }
+                        )
+                    }
+                }
+            }
         }
+    }
+
+    activeResultsTournament?.let { tour ->
+        TournamentResultsSheetDialog(
+            tournament = tour,
+            results = results,
+            currentUserId = currentUserId,
+            onDismiss = { activeResultsTournament = null }
+        )
     }
 }

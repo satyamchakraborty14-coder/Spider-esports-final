@@ -91,6 +91,7 @@ fun AdminDashboardScreen(
     val auditLogs by adminViewModel.auditLogs.collectAsStateWithLifecycle()
     val referrals by adminViewModel.referrals.collectAsStateWithLifecycle()
     val adminUsers by adminViewModel.adminUsers.collectAsStateWithLifecycle()
+    val results by adminViewModel.results.collectAsStateWithLifecycle()
 
     val currentAuthUser = Firebase.auth.currentUser
     LaunchedEffect(currentAuthUser?.uid, currentAuthUser?.email, currentAuthUser?.isEmailVerified) {
@@ -240,7 +241,7 @@ fun AdminDashboardScreen(
             AdminTab.CATEGORIES -> AdminCategoriesSection(categories, adminViewModel)
             AdminTab.RANDOM -> AdminRandomTournamentsSection(customTypes, adminViewModel)
             AdminTab.BANNERS -> AdminBannersSection(banners, adminViewModel)
-            AdminTab.TOURNAMENTS -> AdminTournamentsSection(tournaments, categories, users, adminViewModel)
+            AdminTab.TOURNAMENTS -> AdminTournamentsSection(tournaments, categories, users, registrations, results, adminViewModel)
             AdminTab.USERS -> AdminUsersSection(users, adminUsers, adminViewModel)
             AdminTab.WALLETS -> AdminWalletsSection(users, wallets, walletConfig, payments, payouts, transactions, referrals, adminViewModel)
             AdminTab.SUPPORT -> AdminSupportAndConfigSection(announcements, tickets, disputes, adminViewModel)
