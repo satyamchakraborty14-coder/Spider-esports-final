@@ -42,6 +42,12 @@ jobs:
         with:
           gradle-version: "9.3.1"
 
+      - name: Cache signing keystore
+        uses: actions/cache@v4
+        with:
+          path: debug.keystore
+          key: spider-debug-keystore-v1
+
       - name: Restore Firebase config & registered keystore
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
@@ -60,8 +66,13 @@ jobs:
             elif [ -f debug.keystore.base64 ]; then
               tr -d '[:space:]' < debug.keystore.base64 | base64 -d > debug.keystore
             else
-              echo "ERROR: Missing debug.keystore. Add DEBUG_KEYSTORE_BASE64 in GitHub Settings -> Secrets -> Actions."
-              exit 1
+              echo "Generating GitHub debug.keystore..."
+              keytool -genkeypair -v -keystore debug.keystore \
+                -alias androiddebugkey -storepass android -keypass android \
+                -keyalg RSA -keysize 2048 -validity 10000 \
+                -dname "CN=Android Debug,O=Android,C=US"
+              echo "=== Add these fingerprints to Firebase Console if Google Sign-In cancels on phone ==="
+              keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android | grep -E "SHA1:|SHA256:" || true
             fi
           fi
 
