@@ -313,6 +313,12 @@ fun AuthScreen(
                                     scope = scope,
                                     onAuthCancelled = {
                                         isLoading = false
+                                        val sha1 = AuthHelper.getAppSigningSha1(context)
+                                        errorMessage = if (sha1.isNotBlank()) {
+                                            "Google Sign-In was cancelled or closed. If no Google account picker appeared, register this APK's SHA-1 in Firebase Console -> Project Settings:\nSHA-1: $sha1"
+                                        } else {
+                                            "Google Sign-In was cancelled. Please select a Google account to continue."
+                                        }
                                     }
                                 )
                             },
@@ -483,16 +489,17 @@ fun AuthScreen(
                                                 onRegistrationBusyChange(false)
                                                 onAuthSuccess()
                                             }.onFailure { err ->
+                                                val errText = err.localizedMessage ?: "Account validation failed."
                                                 if (existingDoc?.exists() != true) {
                                                     AuthHelper.signOut(credentialManager, scope) {
                                                         isLoading = false
                                                         onRegistrationBusyChange(false)
-                                                        errorMessage = err.localizedMessage ?: "Account validation failed."
+                                                        errorMessage = errText
                                                     }
                                                 } else {
                                                     isLoading = false
                                                     onRegistrationBusyChange(false)
-                                                    onAuthSuccess()
+                                                    errorMessage = errText
                                                 }
                                             }
                                         }
@@ -506,6 +513,12 @@ fun AuthScreen(
                                     onAuthCancelled = {
                                         isLoading = false
                                         onRegistrationBusyChange(false)
+                                        val sha1 = AuthHelper.getAppSigningSha1(context)
+                                        errorMessage = if (sha1.isNotBlank()) {
+                                            "Google Sign-In was cancelled or closed. If no Google account picker appeared, register this APK's SHA-1 in Firebase Console -> Project Settings:\nSHA-1: $sha1"
+                                        } else {
+                                            "Google Sign-In was cancelled. Please select a Google account to continue."
+                                        }
                                     }
                                 )
                             },

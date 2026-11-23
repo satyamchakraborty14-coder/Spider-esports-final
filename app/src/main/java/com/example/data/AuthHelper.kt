@@ -2,6 +2,9 @@ package com.example.data
 
 import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
@@ -34,6 +37,7 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 object AuthHelper {
@@ -51,6 +55,38 @@ object AuthHelper {
     fun isBootstrapAdmin(user: FirebaseUser?): Boolean {
         if (user == null) return false
         return user.email.equals(BOOTSTRAP_ADMIN_EMAIL, ignoreCase = true) && user.isEmailVerified
+    }
+
+    private tailrec fun Context.findActivity(): Activity? = when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.findActivity()
+        else -> null
+    }
+
+    fun getAppSigningSha1(context: Context): String {
+        return try {
+            val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val info = context.packageManager.getPackageInfo(
+                    context.packageName,
+                    PackageManager.GET_SIGNING_CERTIFICATES
+                )
+                val signingInfo = info.signingInfo ?: return ""
+                if (signingInfo.hasMultipleSigners()) signingInfo.apkContentsSigners else signingInfo.signingCertificateHistory
+            } else {
+                @Suppress("DEPRECATION")
+                val info = context.packageManager.getPackageInfo(
+                    context.packageName,
+                    PackageManager.GET_SIGNATURES
+                )
+                @Suppress("DEPRECATION")
+                info.signatures
+            }
+            val certBytes = signatures?.firstOrNull()?.toByteArray() ?: return ""
+            val digest = MessageDigest.getInstance("SHA-1").digest(certBytes)
+            digest.joinToString(":") { "%02X".format(it) }
+        } catch (_: Exception) {
+            ""
+        }
     }
 
     fun attemptAutoSignIn(
@@ -126,7 +162,7 @@ object AuthHelper {
             .build()
         scope.launch {
             try {
-                val activity = context as? Activity
+                val activity = context.findActivity()
                     ?: throw IllegalStateException("Activity context required for Credential Manager")
                 val cred = credentialManager.getCredential(activity, request).credential
                 if (cred is CustomCredential && cred.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
@@ -143,10 +179,15 @@ object AuthHelper {
                 onAuthCancelled()
             } catch (e: NoCredentialException) {
                 Log.w(TAG, "No Google account available on device: ${e.message}")
-                onAuthError("No Google account found on this device. Please add a Google account in device Settings and try again.")
+                val sha1 = getAppSigningSha1(context)
+                val shaHint = if (sha1.isNotBlank()) "\n\nIf you already have a Google account on this phone, register this APK SHA-1 in Firebase Console:\n$sha1" else ""
+                onAuthError("No Google account found on this device. Please add a Google account in device Settings and try again.$shaHint")
             } catch (e: GetCredentialException) {
                 Log.w(TAG, "Google Sign-In credential error: ${e.message}")
-                onAuthError(e.errorMessage?.toString() ?: e.localizedMessage ?: "Google Sign-In failed")
+                val sha1 = getAppSigningSha1(context)
+                val baseMsg = e.errorMessage?.toString() ?: e.localizedMessage ?: "Google Sign-In failed"
+                val shaHint = if (sha1.isNotBlank()) "\n\nAPK SHA-1: $sha1" else ""
+                onAuthError("$baseMsg$shaHint")
             } catch (e: Exception) {
                 Log.e(TAG, "Google Sign-In failed", e)
                 onAuthError(e.localizedMessage ?: "Sign in failed")

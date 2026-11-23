@@ -71,10 +71,18 @@ jobs:
                 -alias androiddebugkey -storepass android -keypass android \
                 -keyalg RSA -keysize 2048 -validity 10000 \
                 -dname "CN=Android Debug,O=Android,C=US"
-              echo "=== Add these fingerprints to Firebase Console if Google Sign-In cancels on phone ==="
-              keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android | grep -E "SHA1:|SHA256:" || true
             fi
           fi
+          FINGERPRINTS="$(keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android | grep -E 'SHA1:|SHA256:' || true)"
+          echo "=== APK Signing Fingerprints (must be registered in Firebase Console for Google Sign-In) ==="
+          echo "$FINGERPRINTS"
+          {
+            echo "### Spider Esports APK Signing Fingerprints"
+            echo "Add these in Firebase Console -> Project Settings -> \`com.aistudio.spideresports.vkmrqp\` -> Add fingerprint (required once for Google Sign-In):"
+            echo '```text'
+            echo "$FINGERPRINTS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build Spider Esports APK
         run: gradle :app:assembleDebug --no-daemon
