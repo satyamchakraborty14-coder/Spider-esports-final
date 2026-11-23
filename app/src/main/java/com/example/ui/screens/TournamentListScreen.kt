@@ -410,7 +410,7 @@ fun JoinTournamentDialog(
                             Icon(Icons.Filled.VerifiedUser, null, tint = if (isSuspended) SpiderRedBright else SpiderEmerald, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                if (isSuspended) "Account ${profile?.status ?: "Restricted"}" else "Account Active (${profile?.username ?: "Player"})",
+                                if (isSuspended) "Account ${profile.status}" else "Account Active (${profile?.username ?: "Player"})",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextPrimary
                             )
