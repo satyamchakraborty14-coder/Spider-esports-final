@@ -77,4 +77,27 @@ object AccountValidationUtil {
         val bytes = MessageDigest.getInstance("SHA-256").digest(normalizedInput.toByteArray(Charsets.UTF_8))
         return bytes.joinToString("") { "%02x".format(it) }
     }
+
+    fun isPersonalWhatsAppNumberUrl(raw: String): Boolean {
+        val trimmed = raw.trim().lowercase(Locale.US)
+        if (trimmed.isEmpty()) return false
+        return trimmed.contains("wa.me/") ||
+            trimmed.contains("api.whatsapp.com/send") ||
+            trimmed.startsWith("+") ||
+            trimmed.all { it.isDigit() || it == ' ' || it == '-' }
+    }
+
+    fun sanitizeWhatsAppChannelUrl(raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) return ""
+        if (trimmed.contains("0000000000")) return ""
+        if (isPersonalWhatsAppNumberUrl(trimmed)) return ""
+        return if (trimmed.startsWith("https://", ignoreCase = true) ||
+            trimmed.startsWith("http://", ignoreCase = true)
+        ) {
+            trimmed
+        } else {
+            ""
+        }
+    }
 }

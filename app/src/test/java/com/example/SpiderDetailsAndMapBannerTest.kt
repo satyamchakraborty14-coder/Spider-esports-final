@@ -1,13 +1,20 @@
 package com.example
 
+import com.example.data.AccountValidationUtil
 import com.example.model.MapBanner
 import com.example.model.Registration
+import com.example.model.RoomCredential
+import com.example.model.Tournament
 import com.example.model.TournamentParticipant
+import com.example.ui.screens.canDisplayRoomCredentialInDetails
 import com.example.ui.screens.findSavedMapBanner
 import com.example.ui.screens.orderTournamentParticipants
+import com.example.ui.screens.shouldFetchRoomCredentialForMatch
 import com.google.firebase.Timestamp
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SpiderDetailsAndMapBannerTest {
@@ -81,5 +88,42 @@ class SpiderDetailsAndMapBannerTest {
         assertEquals("https://img/bermuda.png", findSavedMapBanner(" bermuda ", banners)?.bannerUrl)
         assertNull(findSavedMapBanner("Kalahari", banners))
         assertNull(findSavedMapBanner("Alpine", banners))
+    }
+
+    @Test
+    fun `only joined player sees or fetches room credentials when match is live and open slots remain`() {
+        val liveOpenFullMap = Tournament(
+            id = "full_map_live",
+            maxParticipants = 48L,
+            registeredCount = 32L,
+            status = "LIVE",
+            roomReleased = true
+        )
+        val releasedCred = RoomCredential(
+            id = "room",
+            tournamentId = "full_map_live",
+            roomId = "88442211",
+            roomPassword = "SPIDER99",
+            released = true
+        )
+
+        assertFalse(shouldFetchRoomCredentialForMatch(isRegistered = false, tournament = liveOpenFullMap))
+        assertFalse(canDisplayRoomCredentialInDetails(isRegistered = false, credential = releasedCred))
+
+        assertTrue(shouldFetchRoomCredentialForMatch(isRegistered = true, tournament = liveOpenFullMap))
+        assertTrue(canDisplayRoomCredentialInDetails(isRegistered = true, credential = releasedCred))
+        assertFalse(canDisplayRoomCredentialInDetails(isRegistered = true, credential = releasedCred.copy(released = false)))
+    }
+
+    @Test
+    fun `whatsapp channel sanitizer rejects personal whatsapp numbers and preserves channel url`() {
+        assertTrue(AccountValidationUtil.isPersonalWhatsAppNumberUrl("https://wa.me/919876543210"))
+        assertTrue(AccountValidationUtil.isPersonalWhatsAppNumberUrl("https://api.whatsapp.com/send?phone=919876543210"))
+        assertEquals("", AccountValidationUtil.sanitizeWhatsAppChannelUrl("https://wa.me/0000000000"))
+        assertEquals("", AccountValidationUtil.sanitizeWhatsAppChannelUrl("https://wa.me/919876543210"))
+
+        val validChannel = "https://whatsapp.com/channel/0029VaSpiderEsports"
+        assertFalse(AccountValidationUtil.isPersonalWhatsAppNumberUrl(validChannel))
+        assertEquals(validChannel, AccountValidationUtil.sanitizeWhatsAppChannelUrl("  $validChannel  "))
     }
 }

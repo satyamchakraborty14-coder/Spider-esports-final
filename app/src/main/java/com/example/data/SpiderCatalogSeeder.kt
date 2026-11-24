@@ -80,7 +80,7 @@ object SpiderCatalogSeeder {
                 val banners = listOf(
                     Triple("banner_championship", "SPIDER ARENA OPEN", "Free-entry community scrims & fair-play qualifiers") to ("championship" to "TOURNAMENTS"),
                     Triple("banner_rules", "PLAY FAIR. WIN RESPECT.", "Read anti-cheat, emulator & room timing rules") to ("lone_wolf" to "RULES"),
-                    Triple("banner_support", "24/7 PLAYER SUPPORT", "Fast dispute resolution, Telegram & ticket desk") to ("clash_squad" to "SUPPORT")
+                    Triple("banner_support", "24/7 PLAYER SUPPORT", "Tap to connect directly on official Telegram Support") to ("clash_squad" to "SUPPORT")
                 )
                 banners.forEachIndexed { idx, pair ->
                     val (id, title, sub) = pair.first
@@ -112,7 +112,7 @@ object SpiderCatalogSeeder {
                         "body" to "Free-entry and coin-entry tournaments are live across Battle Royale, Lone Wolf & Clash Squad. Add coins in Wallet or join open matches anytime.",
                         "category" to "IMPORTANT",
                         "telegramUrl" to "https://t.me/spideresports_official",
-                        "whatsappUrl" to "https://wa.me/0000000000",
+                        "whatsappUrl" to "",
                         "priority" to 1,
                         "enabled" to true,
                         "createdAt" to now,
@@ -126,7 +126,7 @@ object SpiderCatalogSeeder {
                         "body" to "1. Zero tolerance for hacks, scripts, teaming, or unauthorized emulators.\n2. Room ID & Password unlock 5 minutes before match start for registered players only.\n3. Join your assigned slot promptly; late entries forfeit slots.\n4. Only verified match results affect rankings and rewards.\n5. Raise any score dispute within 30 minutes of match completion.",
                         "category" to "RULES",
                         "telegramUrl" to "https://t.me/spideresports_official",
-                        "whatsappUrl" to "https://wa.me/0000000000",
+                        "whatsappUrl" to "",
                         "priority" to 1,
                         "enabled" to true,
                         "createdAt" to now,
@@ -137,10 +137,10 @@ object SpiderCatalogSeeder {
                     db.collection("announcements").document("ann_support_links"),
                     mapOf(
                         "title" to "Official Support Channels",
-                        "body" to "Reach our tournament marshals via in-app support tickets, Telegram, or WhatsApp.",
+                        "body" to "Reach our tournament marshals via Telegram Support or join our official WhatsApp Channel.",
                         "category" to "SUPPORT_CONFIG",
                         "telegramUrl" to "https://t.me/spideresports_official",
-                        "whatsappUrl" to "https://wa.me/0000000000",
+                        "whatsappUrl" to "",
                         "priority" to 1,
                         "enabled" to true,
                         "createdAt" to now,

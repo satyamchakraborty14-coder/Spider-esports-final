@@ -266,6 +266,10 @@ class SpiderMainViewModel(
         }
     }
 
+    fun showBanner(success: Boolean, message: String) {
+        _actionBanner.value = success to message
+    }
+
     fun clearBanner() {
         _actionBanner.value = null
     }

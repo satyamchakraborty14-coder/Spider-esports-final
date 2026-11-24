@@ -18,7 +18,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.Groups
@@ -129,7 +128,6 @@ fun RulesScreen(
 fun SupportScreen(
     tickets: List<SupportTicket>,
     telegramUrl: String,
-    whatsappUrl: String,
     onBack: () -> Unit,
     onSubmitTicket: (String, String, String, String, (Boolean) -> Unit) -> Unit
 ) {
@@ -153,39 +151,21 @@ fun SupportScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(
-                        onClick = {
-                            val cleanUrl = telegramUrl.trim()
-                            if (cleanUrl.startsWith("https://", true) || cleanUrl.startsWith("http://", true)) {
-                                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, cleanUrl.toUri())) }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = SpiderSurfaceElevated, contentColor = TextPrimary),
-                        border = BorderStroke(1.dp, SpiderCardBorder),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.weight(1f).height(48.dp)
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.Send, null, tint = SpiderRedBright, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Telegram", style = MaterialTheme.typography.labelLarge)
-                    }
-                    Button(
-                        onClick = {
-                            val cleanUrl = whatsappUrl.trim()
-                            if (cleanUrl.startsWith("https://", true) || cleanUrl.startsWith("http://", true)) {
-                                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, cleanUrl.toUri())) }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = SpiderSurfaceElevated, contentColor = TextPrimary),
-                        border = BorderStroke(1.dp, SpiderCardBorder),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.weight(1f).height(48.dp)
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.Chat, null, tint = SpiderEmerald, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("WhatsApp", style = MaterialTheme.typography.labelLarge)
-                    }
+                Button(
+                    onClick = {
+                        val cleanUrl = telegramUrl.trim()
+                        if (cleanUrl.startsWith("https://", true) || cleanUrl.startsWith("http://", true)) {
+                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, cleanUrl.toUri())) }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = SpiderSurfaceElevated, contentColor = TextPrimary),
+                    border = BorderStroke(1.dp, SpiderCardBorder),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Send, null, tint = SpiderRedBright, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Open Telegram Support", style = MaterialTheme.typography.labelLarge)
                 }
             }
 

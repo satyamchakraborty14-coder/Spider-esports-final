@@ -1,9 +1,11 @@
 package com.example
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.net.toUri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -67,6 +69,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.data.AccountValidationUtil
 import com.example.data.AuthHelper
 import com.example.data.SpiderAdminRepository
 import com.example.data.SpiderCatalogRepository
@@ -318,8 +321,25 @@ private fun SpiderAppShell(currentUserId: String) {
     val supportConfig = remember(announcements) {
         announcements.firstOrNull { it.category == "SUPPORT_CONFIG" }
     }
-    val telegramUrl = supportConfig?.telegramUrl ?: "https://t.me/spideresports_official"
-    val whatsappUrl = supportConfig?.whatsappUrl ?: "https://wa.me/0000000000"
+    val telegramUrl = supportConfig?.telegramUrl?.trim()?.ifBlank { "https://t.me/spideresports_official" }
+        ?: "https://t.me/spideresports_official"
+    val whatsappChannelUrl = remember(supportConfig?.whatsappUrl) {
+        AccountValidationUtil.sanitizeWhatsAppChannelUrl(supportConfig?.whatsappUrl ?: "")
+    }
+
+    fun openExternalUrl(rawUrl: String, emptyErrorMessage: String) {
+        val clean = rawUrl.trim()
+        if (clean.startsWith("https://", ignoreCase = true) || clean.startsWith("http://", ignoreCase = true)) {
+            val launched = runCatching {
+                context.startActivity(Intent(Intent.ACTION_VIEW, clean.toUri()))
+            }.isSuccess
+            if (!launched) {
+                mainViewModel.showBanner(false, "Unable to open link on this device.")
+            }
+        } else {
+            mainViewModel.showBanner(false, emptyErrorMessage)
+        }
+    }
 
     val bottomRoutes = setOf(
         AppRoutes.EARN,
@@ -434,7 +454,10 @@ private fun SpiderAppShell(currentUserId: String) {
                                 onBannerAction = { banner ->
                                     when (banner.targetAction) {
                                         "RULES" -> navController.navigate(AppRoutes.RULES)
-                                        "SUPPORT" -> navController.navigate(AppRoutes.SUPPORT)
+                                        "SUPPORT" -> openExternalUrl(
+                                            telegramUrl,
+                                            "Telegram Support URL is not configured by Admin yet."
+                                        )
                                         "RANKING" -> navigateTopTab(BottomNavTab.RANKING)
                                         else -> {
                                             val firstCat = (categoriesState as? UiState.Success)?.data?.firstOrNull()
@@ -443,6 +466,12 @@ private fun SpiderAppShell(currentUserId: String) {
                                             }
                                         }
                                     }
+                                },
+                                onOpenWhatsAppChannel = {
+                                    openExternalUrl(
+                                        whatsappChannelUrl,
+                                        "WhatsApp Channel URL is not set by Admin yet."
+                                    )
                                 },
                                 onMyMatchesClick = { initialTab ->
                                     navController.navigate(AppRoutes.myMatches(initialTab))
@@ -556,6 +585,8 @@ private fun SpiderAppShell(currentUserId: String) {
                                 profile = profile,
                                 wallet = wallet,
                                 results = results,
+                                roomCredential = roomCache[tournamentId],
+                                onRequestRoomCredential = { mainViewModel.loadRoomCredential(tournamentId) },
                                 onBack = { navController.popBackStack() },
                                 onJoinTournament = mainViewModel::registerForTournament
                             )
@@ -592,7 +623,6 @@ private fun SpiderAppShell(currentUserId: String) {
                             SupportScreen(
                                 tickets = tickets,
                                 telegramUrl = telegramUrl,
-                                whatsappUrl = whatsappUrl,
                                 onBack = { navController.popBackStack() },
                                 onSubmitTicket = mainViewModel::submitSupportTicket
                             )

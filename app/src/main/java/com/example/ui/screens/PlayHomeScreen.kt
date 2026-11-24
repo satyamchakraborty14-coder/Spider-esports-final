@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -55,11 +56,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.model.Announcement
 import com.example.model.MatchRecord
 import com.example.model.MatchResult
@@ -111,6 +114,7 @@ fun PlayHomeScreen(
     onAccountClick: () -> Unit,
     onRulesClick: () -> Unit,
     onBannerAction: (PromoBanner) -> Unit,
+    onOpenWhatsAppChannel: () -> Unit = {},
     onMyMatchesClick: (String) -> Unit,
     onSelectGameTab: (PlayGameTab) -> Unit,
     onCategoryClick: (TournamentCategory) -> Unit,
@@ -357,6 +361,27 @@ fun PlayHomeScreen(
                                 }
                             }
                         }
+                    }
+                }
+
+                // 3b. Official WhatsApp Channel Promo Banner
+                item {
+                    Surface(
+                        onClick = onOpenWhatsAppChannel,
+                        shape = RoundedCornerShape(16.dp),
+                        color = SpiderCardDark,
+                        border = BorderStroke(1.5.dp, SpiderEmerald.copy(alpha = 0.7f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(16f / 9f)
+                            .testTag("whatsapp_channel_promo_banner")
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.img_banner_whatsapp_channel_1795509869270),
+                            contentDescription = "Join our WhatsApp Channel",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
                     }
                 }
 
@@ -763,7 +788,7 @@ private fun SoloTournamentCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(120.dp)
-                    .let { m -> if (isCompleted) m.clickable(onClick = onOpenResults) else m }
+                    .clickable(onClick = if (isCompleted) onOpenResults else onDetailsClick)
             ) {
                 SpiderArtworkImage(
                     imageUrl = tournament.bannerUrl,

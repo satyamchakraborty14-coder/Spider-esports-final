@@ -1,5 +1,8 @@
 package com.example.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -25,20 +28,26 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,12 +57,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.model.MatchResult
 import com.example.model.Registration
+import com.example.model.RoomCredential
 import com.example.model.Tournament
 import com.example.model.TournamentParticipant
 import com.example.model.UserProfile
@@ -90,12 +101,16 @@ fun MatchDetailsScreen(
     profile: UserProfile?,
     wallet: Wallet,
     results: List<MatchResult>,
+    roomCredential: RoomCredential? = null,
+    onRequestRoomCredential: () -> Unit = {},
     onBack: () -> Unit,
     onJoinTournament: (Tournament, String, String, (Boolean) -> Unit) -> Unit
 ) {
+    val context = LocalContext.current
     var selectedTab by remember { mutableStateOf(MatchDetailsTab.DESCRIPTION) }
     var showJoinDialog by remember { mutableStateOf(false) }
     var showResultsDialog by remember { mutableStateOf(false) }
+    var copiedLabel by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier
@@ -130,6 +145,13 @@ fun MatchDetailsScreen(
         val progress = (tournament.registeredCount.toFloat() / maxP.toFloat()).coerceIn(0f, 1f)
         val tourResultCount = remember(results, tournament.id) {
             results.count { it.tournamentId == tournament.id }
+        }
+
+        // Only joined players may fetch or view Room ID & Password when released or live
+        LaunchedEffect(activeTournament.id, isRegistered, activeTournament.roomReleased, activeTournament.status) {
+            if (shouldFetchRoomCredentialForMatch(isRegistered, activeTournament)) {
+                onRequestRoomCredential()
+            }
         }
 
         // Order joined members one-by-one: if the current user has joined, start with their name first!
@@ -357,6 +379,155 @@ fun MatchDetailsScreen(
 
                 // 3. Selected Tab Content
                 if (selectedTab == MatchDetailsTab.DESCRIPTION) {
+                    if (isRegistered) {
+                        item {
+                            val canShowCredentials = canDisplayRoomCredentialInDetails(isRegistered, roomCredential)
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (canShowCredentials) SpiderEmerald.copy(alpha = 0.14f) else SpiderSurfaceElevated,
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (canShowCredentials) SpiderEmerald.copy(alpha = 0.7f) else SpiderGold.copy(alpha = 0.45f)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("match_details_room_credentials")
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Key,
+                                                contentDescription = "Room credentials",
+                                                tint = if (canShowCredentials) SpiderEmerald else SpiderGold,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(
+                                                text = "ROOM ID & PASSWORD",
+                                                style = MaterialTheme.typography.titleSmall,
+                                                color = if (canShowCredentials) SpiderEmerald else SpiderGold,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = onRequestRoomCredential,
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Refresh,
+                                                contentDescription = "Refresh Room ID and Password",
+                                                tint = TextSecondary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+
+                                    if (canShowCredentials && roomCredential != null) {
+                                        val copyText: (String, String) -> Unit = { label, value ->
+                                            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                            cm?.setPrimaryClip(ClipData.newPlainText(label, value))
+                                            copiedLabel = label
+                                        }
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(SpiderCardDark)
+                                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text("Room ID", style = MaterialTheme.typography.labelSmall, color = TextMuted)
+                                                Text(
+                                                    text = roomCredential.roomId,
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    color = TextPrimary,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                            IconButton(onClick = { copyText("Room ID", roomCredential.roomId) }) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.ContentCopy,
+                                                    contentDescription = "Copy Room ID",
+                                                    tint = SpiderEmerald,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(SpiderCardDark)
+                                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text("Password", style = MaterialTheme.typography.labelSmall, color = TextMuted)
+                                                Text(
+                                                    text = roomCredential.roomPassword,
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    color = TextPrimary,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                            IconButton(onClick = { copyText("Password", roomCredential.roomPassword) }) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.ContentCopy,
+                                                    contentDescription = "Copy Password",
+                                                    tint = SpiderEmerald,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+                                        if (copiedLabel != null) {
+                                            Text(
+                                                text = "$copiedLabel copied to clipboard",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = SpiderEmerald
+                                            )
+                                        }
+                                    } else if (activeTournament.roomReleased || activeTournament.status == "LIVE") {
+                                        Text(
+                                            text = "Room ID & Password are released for joined players. Tap below if not shown yet.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = TextSecondary
+                                        )
+                                        OutlinedButton(
+                                            onClick = onRequestRoomCredential,
+                                            border = BorderStroke(1.dp, SpiderEmerald),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.fillMaxWidth().height(44.dp)
+                                        ) {
+                                            Text(
+                                                text = "REVEAL ID & PASSWORD",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = SpiderEmerald,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    } else {
+                                        Text(
+                                            text = "You are joined! Room ID & Password will appear right here in Description when released at match time.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = TextSecondary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     item {
                         val descriptionBody = tournament.matchDetails.ifBlank {
                             tournament.shortDescription.ifBlank {
@@ -760,3 +931,13 @@ internal fun orderTournamentParticipants(
         baseList
     }
 }
+
+internal fun shouldFetchRoomCredentialForMatch(
+    isRegistered: Boolean,
+    tournament: Tournament
+): Boolean = isRegistered && (tournament.roomReleased || tournament.status == "LIVE")
+
+internal fun canDisplayRoomCredentialInDetails(
+    isRegistered: Boolean,
+    credential: RoomCredential?
+): Boolean = isRegistered && credential != null && credential.released && credential.roomId.isNotBlank()

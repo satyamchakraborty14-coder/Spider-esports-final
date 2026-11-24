@@ -284,7 +284,7 @@ private fun TournamentDetailCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(136.dp)
-                    .let { m -> if (isCompleted) m.clickable(onClick = onViewResults) else m }
+                    .clickable(onClick = if (isCompleted) onViewResults else onDetailsClick)
                     .testTag("tournament_banner_${tournament.id}")
             ) {
                 SpiderArtworkImage(

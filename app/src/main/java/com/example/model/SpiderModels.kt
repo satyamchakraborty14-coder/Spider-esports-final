@@ -308,7 +308,7 @@ data class Announcement(
     val body: String = "",
     val category: String = "IMPORTANT",
     val telegramUrl: String = "https://t.me/spideresports_official",
-    val whatsappUrl: String = "https://wa.me/0000000000",
+    val whatsappUrl: String = "",
     val priority: Long = 0L,
     val enabled: Boolean = true,
     @ServerTimestamp val createdAt: Timestamp? = null,

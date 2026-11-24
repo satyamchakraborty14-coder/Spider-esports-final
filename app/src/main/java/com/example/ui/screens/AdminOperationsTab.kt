@@ -62,6 +62,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.example.data.AccountValidationUtil
 import com.example.data.AuthHelper
 import com.example.data.ImagePickerUtil
 import com.example.model.AdminUserRecord
@@ -922,7 +923,11 @@ fun AdminSupportAndConfigSection(
     val rulesCfg = announcements.firstOrNull { it.category == "RULES" }
 
     var telegramUrl by remember(supportCfg) { mutableStateOf(supportCfg?.telegramUrl ?: "https://t.me/spideresports_official") }
-    var whatsappUrl by remember(supportCfg) { mutableStateOf(supportCfg?.whatsappUrl ?: "https://wa.me/0000000000") }
+    var whatsappUrl by remember(supportCfg) {
+        val raw = supportCfg?.whatsappUrl ?: ""
+        val cleaned = if (raw.contains("0000000000") || AccountValidationUtil.isPersonalWhatsAppNumberUrl(raw)) "" else raw
+        mutableStateOf(cleaned)
+    }
     var rulesBody by remember(rulesCfg) { mutableStateOf(rulesCfg?.body ?: "") }
     var alertTitle by remember { mutableStateOf("") }
     var alertBody by remember { mutableStateOf("") }
@@ -935,22 +940,60 @@ fun AdminSupportAndConfigSection(
         item {
             Surface(shape = RoundedCornerShape(14.dp), color = SpiderCardDark, border = BorderStroke(1.dp, SpiderCardBorder), modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SpiderSectionTitle(title = "SUPPORT LINKS & RULES")
+                    SpiderSectionTitle(title = "SUPPORT & CHANNEL LINKS")
                     val fc = adminFieldColors()
-                    OutlinedTextField(value = telegramUrl, onValueChange = { telegramUrl = it }, label = { Text("Telegram Support URL") }, singleLine = true, colors = fc, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(value = whatsappUrl, onValueChange = { whatsappUrl = it }, label = { Text("WhatsApp Support URL") }, singleLine = true, colors = fc, modifier = Modifier.fillMaxWidth())
+                    val isPersonalWa = AccountValidationUtil.isPersonalWhatsAppNumberUrl(whatsappUrl)
+                    val cleanChannelUrl = AccountValidationUtil.sanitizeWhatsAppChannelUrl(whatsappUrl)
+                    val channelInvalid = whatsappUrl.isNotBlank() && (isPersonalWa || cleanChannelUrl.isEmpty())
+
+                    OutlinedTextField(
+                        value = telegramUrl,
+                        onValueChange = { telegramUrl = it },
+                        label = { Text("Telegram Support URL") },
+                        singleLine = true,
+                        colors = fc,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = whatsappUrl,
+                        onValueChange = { whatsappUrl = it },
+                        label = { Text("WhatsApp Channel URL") },
+                        placeholder = { Text("https://whatsapp.com/channel/...") },
+                        supportingText = {
+                            Text(
+                                text = when {
+                                    isPersonalWa -> "Personal WhatsApp numbers are not allowed. Paste your official WhatsApp Channel URL."
+                                    channelInvalid -> "Enter a valid URL starting with https://whatsapp.com/channel/..."
+                                    else -> "Channel invite link opened by the Play page WhatsApp Channel banner (not personal WhatsApp)."
+                                },
+                                color = if (channelInvalid) SpiderRedBright else TextMuted
+                            )
+                        },
+                        isError = channelInvalid,
+                        singleLine = true,
+                        colors = fc,
+                        modifier = Modifier.fillMaxWidth().testTag("admin_whatsapp_channel_url_input")
+                    )
                     Button(
                         onClick = {
-                            adminViewModel.saveAnnouncementConfig("ann_support_links", "Official Support Channels", "Reach tournament marshals via Telegram or WhatsApp.", "SUPPORT_CONFIG", telegramUrl, whatsappUrl)
+                            adminViewModel.saveAnnouncementConfig(
+                                id = "ann_support_links",
+                                title = "Official Support Channels",
+                                body = "Reach tournament marshals via Telegram Support or join our official WhatsApp Channel.",
+                                category = "SUPPORT_CONFIG",
+                                telegramUrl = telegramUrl.trim(),
+                                whatsappUrl = cleanChannelUrl
+                            )
                         },
+                        enabled = !channelInvalid,
                         colors = ButtonDefaults.buttonColors(containerColor = SpiderRed),
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("Update Support Links") }
+                        modifier = Modifier.fillMaxWidth().testTag("admin_update_support_links_button")
+                    ) { Text("Update Support & Channel Links") }
 
                     OutlinedTextField(value = rulesBody, onValueChange = { rulesBody = it }, label = { Text("Spider Esports Rules Text") }, minLines = 3, colors = fc, modifier = Modifier.fillMaxWidth())
                     Button(
                         onClick = {
-                            adminViewModel.saveAnnouncementConfig("ann_rules_master", "SPIDER ESPORTS OFFICIAL RULES", rulesBody, "RULES", telegramUrl, whatsappUrl)
+                            adminViewModel.saveAnnouncementConfig("ann_rules_master", "SPIDER ESPORTS OFFICIAL RULES", rulesBody, "RULES", telegramUrl.trim(), cleanChannelUrl)
                         },
                         enabled = rulesBody.trim().length >= 5,
                         colors = ButtonDefaults.buttonColors(containerColor = SpiderRed),
@@ -969,7 +1012,8 @@ fun AdminSupportAndConfigSection(
                     OutlinedTextField(value = alertBody, onValueChange = { alertBody = it }, label = { Text("Alert Message") }, minLines = 2, colors = fc, modifier = Modifier.fillMaxWidth())
                     Button(
                         onClick = {
-                            adminViewModel.saveAnnouncementConfig("ann_alert_${System.currentTimeMillis()}", alertTitle, alertBody, "IMPORTANT", telegramUrl, whatsappUrl)
+                            val cleanChannel = AccountValidationUtil.sanitizeWhatsAppChannelUrl(whatsappUrl)
+                            adminViewModel.saveAnnouncementConfig("ann_alert_${System.currentTimeMillis()}", alertTitle, alertBody, "IMPORTANT", telegramUrl.trim(), cleanChannel)
                             alertTitle = ""
                             alertBody = ""
                         },

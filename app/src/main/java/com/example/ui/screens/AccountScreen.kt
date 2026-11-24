@@ -259,7 +259,7 @@ fun AccountScreen(
                             if (unreadNotificationsCount > 0) "$unreadNotificationsCount unread alerts" else "All caught up",
                             onClick = onOpenNotifications
                         )
-                        AccountOptionRow(Icons.Filled.HeadsetMic, "Customer Support", "Tickets, disputes & WhatsApp/Telegram", onClick = onOpenSupport)
+                        AccountOptionRow(Icons.Filled.HeadsetMic, "Customer Support", "Support tickets, disputes & FAQs", onClick = onOpenSupport)
                         AccountOptionRow(Icons.AutoMirrored.Filled.Send, "Telegram Support", "Join official Spider Esports Telegram", onClick = {
                             val cleanUrl = telegramUrl.trim()
                             if (cleanUrl.startsWith("https://", true) || cleanUrl.startsWith("http://", true)) {
