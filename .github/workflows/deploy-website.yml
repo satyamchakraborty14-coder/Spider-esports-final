@@ -6,21 +6,17 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
 concurrency:
   group: "pages"
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -96,25 +92,74 @@ jobs:
       - name: Build Spider Esports APK
         run: gradle :app:assembleDebug --no-daemon
 
-      - name: Package APK into website downloads
-        run: |
-          mkdir -p website/downloads
-          cp app/build/outputs/apk/debug/app-debug.apk website/downloads/SpiderEsports-v1.0.apk
+      - name: Stage APK for release & artifact
+        run: cp app/build/outputs/apk/debug/app-debug.apk "${{ runner.temp }}/SpiderEsports-v1.0.apk"
 
       - name: Upload APK build artifact
         uses: actions/upload-artifact@v4
         with:
           name: SpiderEsports-v1.0
-          path: website/downloads/SpiderEsports-v1.0.apk
+          path: ${{ runner.temp }}/SpiderEsports-v1.0.apk
+
+      - name: Publish APK to GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp "${{ runner.temp }}/SpiderEsports-v1.0.apk" SpiderEsports-v1.0.apk
+          if gh release view v1.0 >/dev/null 2>&1; then
+            gh release upload v1.0 SpiderEsports-v1.0.apk --clobber
+          else
+            gh release create v1.0 SpiderEsports-v1.0.apk \
+              --target "$GITHUB_SHA" \
+              --title "Spider Esports v1.0" \
+              --notes "Official Spider Esports Android APK build."
+          fi
+          rm -f SpiderEsports-v1.0.apk
 
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v5
 
+      - name: Prepare static website bundle
+        run: |
+          SITE_DIR="${{ runner.temp }}/pages-site"
+          rm -rf "$SITE_DIR"
+          mkdir -p "$SITE_DIR"
+          cp -RL website/. "$SITE_DIR/"
+          rm -rf "$SITE_DIR/downloads"
+          touch "$SITE_DIR/.nojekyll"
+          APK_URL="https://github.com/${{ github.repository }}/releases/latest/download/SpiderEsports-v1.0.apk"
+          sed -i "s|./downloads/SpiderEsports-v1.0.apk|$APK_URL|g" "$SITE_DIR/index.html"
+          chmod -R a+rX "$SITE_DIR"
+
       - name: Upload website artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: website
+          path: ${{ runner.temp }}/pages-site
 
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}
+    steps:
       - name: Deploy website to GitHub Pages
         id: deployment
+        continue-on-error: true
         uses: actions/deploy-pages@v4
+        with:
+          timeout: 600000
+
+      - name: Wait before retrying transient Pages deployment failure
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 15
+
+      - name: Retry deploy website to GitHub Pages
+        id: deployment_retry
+        if: steps.deployment.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+        with:
+          timeout: 600000
