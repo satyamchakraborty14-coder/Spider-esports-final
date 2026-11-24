@@ -446,6 +446,7 @@ private fun SpiderAppShell(currentUserId: String) {
                                 registrations = registrations,
                                 results = results,
                                 currentUserId = currentUserId,
+                                whatsappBannerUrl = supportConfig?.whatsappBannerUrl ?: "",
                                 onLanguageChange = mainViewModel::setLanguage,
                                 onSupportClick = { navController.navigate(AppRoutes.SUPPORT) },
                                 onWalletClick = { navigateTopTab(BottomNavTab.WALLET) },
@@ -521,6 +522,7 @@ private fun SpiderAppShell(currentUserId: String) {
                                 payoutRequests = payoutRequests,
                                 onSubmitDeposit = mainViewModel::submitDepositRequest,
                                 onSubmitWithdrawal = mainViewModel::submitWithdrawalRequest,
+                                onRefreshWallet = mainViewModel::refreshWallet,
                                 onBack = { navigateTopTab(BottomNavTab.PLAY) }
                             )
                         }

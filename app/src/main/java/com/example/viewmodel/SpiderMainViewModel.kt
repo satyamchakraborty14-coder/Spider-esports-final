@@ -39,11 +39,13 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -81,16 +83,27 @@ class SpiderMainViewModel(
         CoinPackage("pkg_1000", "Spider Elite Pack", 1000, "₹920", "PRO")
     )
 
+    private val walletRefreshTrigger = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
     val userProfile: StateFlow<UiState<UserProfile?>> =
-        userRepo.observeUserProfile(currentUserId).toUiState("profile")
+        userRepo.observeUserProfile(currentUserId).toUiState("profile", SharingStarted.Eagerly)
 
     val wallet: StateFlow<Wallet> =
-        userRepo.observeWallet(currentUserId)
+        channelFlow {
+            launch {
+                userRepo.observeWallet(currentUserId).collect { send(it) }
+            }
+            launch {
+                walletRefreshTrigger.collect {
+                    userRepo.fetchWallet(currentUserId).onSuccess { send(it) }
+                }
+            }
+        }
             .catch { error ->
                 val fe = extractFirestoreErrorOrRethrow(error)
                 Log.w(TAG, "Wallet stream error", fe)
             }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), Wallet(id = currentUserId, userId = currentUserId))
+            .stateIn(viewModelScope, SharingStarted.Eagerly, Wallet(id = currentUserId, userId = currentUserId))
 
     val walletConfig: StateFlow<WalletConfig> =
         userRepo.observeWalletConfig(currentUserId)
@@ -98,7 +111,7 @@ class SpiderMainViewModel(
                 val fe = extractFirestoreErrorOrRethrow(error)
                 Log.w(TAG, "Wallet config stream error", fe)
             }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), WalletConfig(id = "wallet"))
+            .stateIn(viewModelScope, SharingStarted.Eagerly, WalletConfig(id = "wallet"))
 
     val paymentOrders: StateFlow<List<PaymentOrder>> =
         userRepo.observePaymentOrders(currentUserId)
@@ -106,10 +119,10 @@ class SpiderMainViewModel(
                 val fe = extractFirestoreErrorOrRethrow(error)
                 Log.w(TAG, "Payment orders stream error", fe)
             }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val transactions: StateFlow<UiState<List<WalletTransaction>>> =
-        userRepo.observeTransactions(currentUserId).toUiState("transactions")
+        userRepo.observeTransactions(currentUserId).toUiState("transactions", SharingStarted.Eagerly)
 
     val payoutRequests: StateFlow<List<PayoutRequest>> =
         userRepo.observePayoutRequests(currentUserId)
@@ -117,7 +130,7 @@ class SpiderMainViewModel(
                 val fe = extractFirestoreErrorOrRethrow(error)
                 Log.w(TAG, "Payout requests stream error", fe)
             }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val categories: StateFlow<UiState<List<TournamentCategory>>> =
         catalogRepo.observeEnabledCategories(currentUserId).toUiState("categories")
@@ -136,7 +149,7 @@ class SpiderMainViewModel(
                 val fe = extractFirestoreErrorOrRethrow(error)
                 Log.w(TAG, "Announcement stream error", fe)
             }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val tournaments: StateFlow<UiState<List<Tournament>>> =
         catalogRepo.observePublicTournaments(currentUserId).toUiState("tournaments")
@@ -239,8 +252,13 @@ class SpiderMainViewModel(
                         adminEmail = currentUser.email ?: AuthHelper.BOOTSTRAP_ADMIN_EMAIL
                     )
                 }
+                refreshWallet()
             }
         }
+    }
+
+    fun refreshWallet() {
+        walletRefreshTrigger.tryEmit(Unit)
     }
 
     fun selectGameTab(tab: PlayGameTab) {
@@ -294,6 +312,7 @@ class SpiderMainViewModel(
                 inGameUid = inGameUid
             )
             res.onSuccess {
+                refreshWallet()
                 val feeNote = if (tournament.entryFee > 0.0) " (${tournament.entryFee.toInt()} Coins deducted)" else ""
                 _actionBanner.value = true to "Registered for ${tournament.title}!$feeNote"
                 onComplete(true)
@@ -469,6 +488,7 @@ class SpiderMainViewModel(
         viewModelScope.launch {
             val res = userRepo.submitDepositRequest(coinAmount, referenceId)
             res.onSuccess {
+                refreshWallet()
                 _actionBanner.value = true to "Deposit request (${coinAmount.toInt()} Coins = ₹${coinAmount.toInt()}) submitted for Admin verification."
                 onDone(true, null)
             }.onFailure { err ->
@@ -495,7 +515,8 @@ class SpiderMainViewModel(
         viewModelScope.launch {
             val res = userRepo.submitWithdrawalRequest(coinAmount, destinationType, destinationDetails)
             res.onSuccess {
-                _actionBanner.value = true to "Winning withdrawal of ${coinAmount.toInt()} Coins (₹${coinAmount.toInt()}) submitted!"
+                refreshWallet()
+                _actionBanner.value = true to "Winning withdrawal of ${coinAmount.toInt()} Coins (₹${coinAmount.toInt()}) submitted! Balance held pending review."
                 onDone(true, null)
             }.onFailure { err ->
                 val msg = err.localizedMessage ?: "Withdrawal request failed"
@@ -505,7 +526,10 @@ class SpiderMainViewModel(
         }
     }
 
-    private fun <T> Flow<T>.toUiState(label: String): StateFlow<UiState<T>> =
+    private fun <T> Flow<T>.toUiState(
+        label: String,
+        started: SharingStarted = SharingStarted.WhileSubscribed(5000L)
+    ): StateFlow<UiState<T>> =
         this.map<T, UiState<T>> { UiState.Success(it) }
             .catch { error ->
                 val root = extractFirestoreErrorOrRethrow(error)
@@ -514,7 +538,7 @@ class SpiderMainViewModel(
             }
             .stateIn(
                 scope = viewModelScope,
-                started = SharingStarted.WhileSubscribed(5000L),
+                started = started,
                 initialValue = UiState.Loading
             )
 

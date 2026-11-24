@@ -375,6 +375,7 @@ service cloud.firestore {
              data.category in ['IMPORTANT', 'RULES', 'ALERT', 'SUPPORT_CONFIG'] &&
              isOptString(data, 'telegramUrl', 300) &&
              isOptString(data, 'whatsappUrl', 300) &&
+             isOptString(data, 'whatsappBannerUrl', 200000) &&
              data.priority is int && data.priority >= 0 &&
              data.enabled is bool &&
              isValidTimestamp(data.createdAt) &&
@@ -488,6 +489,34 @@ service cloud.firestore {
              (get(tourPath).data.entryFee - data.amount) <= 0.01 &&
              !exists(regPath) &&
              existsAfter(regPath);
+    }
+
+    function canVerifyPayoutHoldPaths(payoutId, data) {
+      let payoutPath = /databases/$(database)/documents/payoutRequests/$(payoutId);
+      let walletPath = /databases/$(database)/documents/wallets/$(request.auth.uid);
+      return isValidId(payoutId) &&
+             !exists(payoutPath) &&
+             existsAfter(payoutPath) &&
+             getAfter(payoutPath).data.userId == request.auth.uid &&
+             getAfter(payoutPath).data.status == 'PENDING' &&
+             (data.amount - getAfter(payoutPath).data.amount) <= 0.01 &&
+             (getAfter(payoutPath).data.amount - data.amount) <= 0.01 &&
+             exists(walletPath) &&
+             (get(walletPath).data.winningBalance - getAfter(walletPath).data.winningBalance) >= (data.amount - 0.01) &&
+             (get(walletPath).data.winningBalance - getAfter(walletPath).data.winningBalance) <= (data.amount + 0.01);
+    }
+
+    function canUserCreatePayoutHoldTransaction(txId, data) {
+      return isSignedIn() &&
+             isNotRestrictedUser() &&
+             data.userId == request.auth.uid &&
+             data.type == 'PAYOUT' &&
+             data.direction == 'DEBIT' &&
+             data.status == 'PENDING' &&
+             txId.size() > 7 &&
+             txId[0:7] == 'tx_out_' &&
+             data.amount >= 50 &&
+             canVerifyPayoutHoldPaths(txId[7:txId.size()], data);
     }
 
     // --- COLLECTION RULES ---
@@ -749,7 +778,7 @@ service cloud.firestore {
       allow get: if isSignedIn() && isValidId(txId) && (isAdmin() || (resource != null && existing().userId == request.auth.uid));
       allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
       allow create: if isValidId(txId) && isValidTransaction(incoming()) && (
-        isAdmin() || canUserCreateJoinTransaction(txId, incoming())
+        isAdmin() || canUserCreateJoinTransaction(txId, incoming()) || canUserCreatePayoutHoldTransaction(txId, incoming())
       );
       allow update: if isAdmin() && isValidId(txId) && isValidTransaction(incoming());
       allow delete: if false;
@@ -793,7 +822,15 @@ service cloud.firestore {
           incoming().amount >= 50 &&
           incoming().reviewedBy == '' &&
           exists(/databases/$(database)/documents/wallets/$(request.auth.uid)) &&
-          get(/databases/$(database)/documents/wallets/$(request.auth.uid)).data.winningBalance >= incoming().amount
+          get(/databases/$(database)/documents/wallets/$(request.auth.uid)).data.winningBalance >= incoming().amount &&
+          (get(/databases/$(database)/documents/wallets/$(request.auth.uid)).data.winningBalance - getAfter(/databases/$(database)/documents/wallets/$(request.auth.uid)).data.winningBalance) >= (incoming().amount - 0.01) &&
+          (get(/databases/$(database)/documents/wallets/$(request.auth.uid)).data.winningBalance - getAfter(/databases/$(database)/documents/wallets/$(request.auth.uid)).data.winningBalance) <= (incoming().amount + 0.01) &&
+          (get(/databases/$(database)/documents/wallets/$(request.auth.uid)).data.totalBalance - getAfter(/databases/$(database)/documents/wallets/$(request.auth.uid)).data.totalBalance) >= (incoming().amount - 0.01) &&
+          (get(/databases/$(database)/documents/wallets/$(request.auth.uid)).data.totalBalance - getAfter(/databases/$(database)/documents/wallets/$(request.auth.uid)).data.totalBalance) <= (incoming().amount + 0.01) &&
+          getAfter(/databases/$(database)/documents/wallets/$(request.auth.uid)).data.depositedBalance == get(/databases/$(database)/documents/wallets/$(request.auth.uid)).data.depositedBalance &&
+          getAfter(/databases/$(database)/documents/wallets/$(request.auth.uid)).data.payoutsTotal == get(/databases/$(database)/documents/wallets/$(request.auth.uid)).data.payoutsTotal &&
+          !exists(/databases/$(database)/documents/transactions/$('tx_out_' + payoutId)) &&
+          existsAfter(/databases/$(database)/documents/transactions/$('tx_out_' + payoutId))
         )
       );
       allow update: if isAdmin() && isValidId(payoutId) && isValidPayoutRequest(incoming()) &&

@@ -31,11 +31,13 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -48,7 +50,9 @@ class SpiderAdminViewModel(
     private val _statusMessage = MutableStateFlow<Pair<Boolean, String>?>(null)
     val statusMessage: StateFlow<Pair<Boolean, String>?> = _statusMessage.asStateFlow()
 
-    val users: StateFlow<List<UserProfile>> = adminRepo.observeAllUsers(adminUid).safeList("users")
+    private val walletsRefreshTrigger = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    val users: StateFlow<List<UserProfile>> = adminRepo.observeAllUsers(adminUid).safeList("users", SharingStarted.Eagerly)
     val categories: StateFlow<List<TournamentCategory>> = adminRepo.observeAllCategories(adminUid).safeList("categories")
     val customTypes: StateFlow<List<CustomTournamentType>> = adminRepo.observeAllCustomTypes(adminUid).safeList("customTypes")
     val tournaments: StateFlow<List<Tournament>> = adminRepo.observeAllTournaments(adminUid).safeList("tournaments")
@@ -56,7 +60,25 @@ class SpiderAdminViewModel(
     val mapBanners: StateFlow<List<MapBanner>> = adminRepo.observeAllMapBanners(adminUid).safeList("mapBanners")
     val announcements: StateFlow<List<Announcement>> = adminRepo.observeAllAnnouncements(adminUid).safeList("announcements")
     val registrations: StateFlow<List<Registration>> = adminRepo.observeAllRegistrations(adminUid).safeList("registrations")
-    val wallets: StateFlow<List<Wallet>> = adminRepo.observeAllWallets(adminUid).safeList("wallets")
+    val wallets: StateFlow<List<Wallet>> =
+        channelFlow {
+            launch {
+                adminRepo.observeAllWallets(adminUid).collect { send(it) }
+            }
+            launch {
+                walletsRefreshTrigger.collect {
+                    adminRepo.fetchAllWallets().onSuccess { send(it) }
+                }
+            }
+        }
+            .catch { error ->
+                val firestoreError = generateSequence(error) { it.cause }
+                    .filterIsInstance<FirebaseFirestoreException>()
+                    .firstOrNull()
+                if (firestoreError == null && error is CancellationException) throw error
+                Log.w("SpiderAdminVM", "Error observing wallets", firestoreError ?: error)
+            }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val walletConfig: StateFlow<WalletConfig> = adminRepo.observeWalletConfig(adminUid)
         .catch { error ->
             val firestoreError = generateSequence(error) { it.cause }
@@ -65,16 +87,20 @@ class SpiderAdminViewModel(
             if (firestoreError == null && error is CancellationException) throw error
             Log.w("SpiderAdminVM", "Error observing walletConfig", firestoreError ?: error)
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), WalletConfig(id = "wallet"))
-    val payments: StateFlow<List<PaymentOrder>> = adminRepo.observeAllPayments(adminUid).safeList("payments")
-    val transactions: StateFlow<List<WalletTransaction>> = adminRepo.observeAllTransactions(adminUid).safeList("transactions")
-    val payouts: StateFlow<List<PayoutRequest>> = adminRepo.observeAllPayouts(adminUid).safeList("payouts")
+        .stateIn(viewModelScope, SharingStarted.Eagerly, WalletConfig(id = "wallet"))
+    val payments: StateFlow<List<PaymentOrder>> = adminRepo.observeAllPayments(adminUid).safeList("payments", SharingStarted.Eagerly)
+    val transactions: StateFlow<List<WalletTransaction>> = adminRepo.observeAllTransactions(adminUid).safeList("transactions", SharingStarted.Eagerly)
+    val payouts: StateFlow<List<PayoutRequest>> = adminRepo.observeAllPayouts(adminUid).safeList("payouts", SharingStarted.Eagerly)
     val tickets: StateFlow<List<SupportTicket>> = adminRepo.observeAllTickets(adminUid).safeList("tickets")
     val disputes: StateFlow<List<Dispute>> = adminRepo.observeAllDisputes(adminUid).safeList("disputes")
     val auditLogs: StateFlow<List<AuditLog>> = adminRepo.observeAuditLogs(adminUid).safeList("auditLogs")
     val referrals: StateFlow<List<ReferralRecord>> = adminRepo.observeAllReferrals(adminUid).safeList("referrals")
     val adminUsers: StateFlow<List<AdminUserRecord>> = adminRepo.observeAllAdminUsers(adminUid).safeList("adminUsers")
-    val results: StateFlow<List<MatchResult>> = adminRepo.observeAllResults(adminUid).safeList("results")
+    val results: StateFlow<List<MatchResult>> = adminRepo.observeAllResults(adminUid).safeList("results", SharingStarted.Eagerly)
+
+    fun refreshWallets() {
+        walletsRefreshTrigger.tryEmit(Unit)
+    }
 
     fun clearStatus() {
         _statusMessage.value = null
@@ -274,7 +300,10 @@ class SpiderAdminViewModel(
     fun adjustWallet(targetUid: String, amount: Double, direction: String, bucket: String, reason: String) {
         viewModelScope.launch {
             adminRepo.adjustUserWallet(targetUid, amount, direction, bucket, reason)
-                .onSuccess { _statusMessage.value = true to "Wallet [$bucket] $direction of ${amount.toInt()} Coins logged." }
+                .onSuccess {
+                    refreshWallets()
+                    _statusMessage.value = true to "Wallet [$bucket] $direction of ${amount.toInt()} Coins logged."
+                }
                 .onFailure { _statusMessage.value = false to (it.localizedMessage ?: "Wallet adjustment failed") }
         }
     }
@@ -283,6 +312,7 @@ class SpiderAdminViewModel(
         viewModelScope.launch {
             adminRepo.reviewDepositRequest(payment, approve, note)
                 .onSuccess {
+                    refreshWallets()
                     _statusMessage.value = true to if (approve) {
                         "Approved deposit +${payment.coinAmount.toInt()} Coins to Deposit balance."
                     } else {
@@ -297,6 +327,7 @@ class SpiderAdminViewModel(
         viewModelScope.launch {
             adminRepo.reviewPayoutRequest(payout, approve, note)
                 .onSuccess {
+                    refreshWallets()
                     _statusMessage.value = true to if (approve) {
                         "Withdrawal ₹${payout.amount.toInt()} marked PAID from Winning balance."
                     } else {
@@ -329,6 +360,7 @@ class SpiderAdminViewModel(
                 rewardCoins = rewardCoins,
                 leaderboardMode = leaderboardMode
             ).onSuccess {
+                refreshWallets()
                 val msg = "Saved #$placement: $playerName ($kills kills, ${rewardCoins.toInt()} Coins)"
                 _statusMessage.value = true to msg
                 onDone(true, msg)
@@ -362,10 +394,11 @@ class SpiderAdminViewModel(
         body: String,
         category: String,
         telegramUrl: String,
-        whatsappUrl: String
+        whatsappUrl: String,
+        whatsappBannerUrl: String = ""
     ) {
         viewModelScope.launch {
-            adminRepo.saveAnnouncementOrSupportLinks(id, title, body, category, telegramUrl, whatsappUrl)
+            adminRepo.saveAnnouncementOrSupportLinks(id, title, body, category, telegramUrl, whatsappUrl, whatsappBannerUrl)
                 .onSuccess { _statusMessage.value = true to "Announcement/config updated." }
                 .onFailure { _statusMessage.value = false to (it.localizedMessage ?: "Update failed") }
         }
@@ -391,6 +424,7 @@ class SpiderAdminViewModel(
         viewModelScope.launch {
             adminRepo.approveAndCreditReferralBonus(referral, bonusCoins)
                 .onSuccess {
+                    refreshWallets()
                     _statusMessage.value = true to "Credited ${bonusCoins.toInt()} Coins referral bonus to ${referral.referrerUsername}."
                 }
                 .onFailure {
@@ -423,12 +457,15 @@ class SpiderAdminViewModel(
         }
     }
 
-    private fun <T> Flow<List<T>>.safeList(label: String): StateFlow<List<T>> =
+    private fun <T> Flow<List<T>>.safeList(
+        label: String,
+        started: SharingStarted = SharingStarted.WhileSubscribed(5000L)
+    ): StateFlow<List<T>> =
         this.catch { error ->
             val firestoreError = generateSequence(error) { it.cause }
                 .filterIsInstance<FirebaseFirestoreException>()
                 .firstOrNull()
             if (firestoreError == null && error is CancellationException) throw error
             Log.w("SpiderAdminVM", "Error observing $label", firestoreError ?: error)
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+        }.stateIn(viewModelScope, started, emptyList())
 }

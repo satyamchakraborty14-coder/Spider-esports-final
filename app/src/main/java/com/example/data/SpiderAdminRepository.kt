@@ -1,5 +1,6 @@
 package com.example.data
 
+import com.example.data.SpiderWalletUtil.toWriteMap
 import com.example.model.AdminUserRecord
 import com.example.model.Announcement
 import com.example.model.AuditLog
@@ -27,6 +28,7 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.firestore.Source
 import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
@@ -94,6 +96,7 @@ class SpiderAdminRepository(
     fun observeAllUsers(adminUid: String): Flow<List<UserProfile>> =
         db.collection("users").snapshots()
             .map { it.toObjects(UserProfile::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE) }
+            .retryTransientFirestoreErrors("SpiderAdminRepo") { auth.currentUser?.uid == adminUid }
             .catch { logAndRethrow(it, OperationType.LIST, "users", adminUid) }
 
     fun observeAllCategories(adminUid: String): Flow<List<TournamentCategory>> =
@@ -102,6 +105,7 @@ class SpiderAdminRepository(
                 snap.toObjects(TournamentCategory::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedBy { it.displayOrder }
             }
+            .retryTransientFirestoreErrors("SpiderAdminRepo") { auth.currentUser?.uid == adminUid }
             .catch { logAndRethrow(it, OperationType.LIST, "tournamentCategories", adminUid) }
 
     fun observeAllCustomTypes(adminUid: String): Flow<List<CustomTournamentType>> =
@@ -110,6 +114,7 @@ class SpiderAdminRepository(
                 snap.toObjects(CustomTournamentType::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedBy { it.displayOrder }
             }
+            .retryTransientFirestoreErrors("SpiderAdminRepo") { auth.currentUser?.uid == adminUid }
             .catch { logAndRethrow(it, OperationType.LIST, "customTournamentTypes", adminUid) }
 
     fun observeAllTournaments(adminUid: String): Flow<List<Tournament>> =
@@ -118,6 +123,7 @@ class SpiderAdminRepository(
                 snap.toObjects(Tournament::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedByDescending { it.createdAt?.seconds ?: 0L }
             }
+            .retryTransientFirestoreErrors("SpiderAdminRepo") { auth.currentUser?.uid == adminUid }
             .catch { logAndRethrow(it, OperationType.LIST, "tournaments", adminUid) }
 
     fun observeAllBanners(adminUid: String): Flow<List<PromoBanner>> =
@@ -126,6 +132,7 @@ class SpiderAdminRepository(
                 snap.toObjects(PromoBanner::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedBy { it.displayOrder }
             }
+            .retryTransientFirestoreErrors("SpiderAdminRepo") { auth.currentUser?.uid == adminUid }
             .catch { logAndRethrow(it, OperationType.LIST, "banners", adminUid) }
 
     fun observeAllMapBanners(adminUid: String): Flow<List<MapBanner>> =
@@ -134,6 +141,7 @@ class SpiderAdminRepository(
                 snap.toObjects(MapBanner::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedWith(compareBy<MapBanner> { it.displayOrder }.thenBy { it.mapName })
             }
+            .retryTransientFirestoreErrors("SpiderAdminRepo") { auth.currentUser?.uid == adminUid }
             .catch { logAndRethrow(it, OperationType.LIST, "mapBanners", adminUid) }
 
     fun observeAllAnnouncements(adminUid: String): Flow<List<Announcement>> =
@@ -142,6 +150,7 @@ class SpiderAdminRepository(
                 snap.toObjects(Announcement::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedBy { it.priority }
             }
+            .retryTransientFirestoreErrors("SpiderAdminRepo") { auth.currentUser?.uid == adminUid }
             .catch { logAndRethrow(it, OperationType.LIST, "announcements", adminUid) }
 
     fun observeAllRegistrations(adminUid: String): Flow<List<Registration>> =
@@ -150,21 +159,33 @@ class SpiderAdminRepository(
                 snap.toObjects(Registration::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedByDescending { it.createdAt?.seconds ?: 0L }
             }
+            .retryTransientFirestoreErrors("SpiderAdminRepo") { auth.currentUser?.uid == adminUid }
             .catch { logAndRethrow(it, OperationType.LIST, "registrations", adminUid) }
 
     fun observeAllWallets(adminUid: String): Flow<List<Wallet>> =
         db.collection("wallets").snapshots()
             .map { snap ->
-                snap.documents.mapNotNull { doc ->
-                    val w = doc.toObject(Wallet::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-                    if (w != null && !doc.contains("bonusBalance") && w.earningsBalance > 0.0) {
-                        w.copy(bonusBalance = w.earningsBalance)
-                    } else {
-                        w
-                    }
+                snap.documents.map { doc ->
+                    SpiderWalletUtil.parseWalletSnapshot(doc, doc.id)
                 }
             }
+            .retryTransientFirestoreErrors("SpiderAdminRepo") { auth.currentUser?.uid == adminUid }
             .catch { logAndRethrow(it, OperationType.LIST, "wallets", adminUid) }
+
+    suspend fun fetchAllWallets(): Result<List<Wallet>> = try {
+        requireAdminIdentity()
+        val snap = try {
+            db.collection("wallets").get(Source.SERVER).await()
+        } catch (_: Exception) {
+            db.collection("wallets").get().await()
+        }
+        Result.success(snap.documents.map { doc -> SpiderWalletUtil.parseWalletSnapshot(doc, doc.id) })
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        handleFirestoreError(e, OperationType.LIST, "wallets")
+        Result.failure(e)
+    }
 
     fun observeWalletConfig(adminUid: String): Flow<WalletConfig> =
         db.collection("appConfig").document("wallet").snapshots()
@@ -172,6 +193,7 @@ class SpiderAdminRepository(
                 snap.toObject(WalletConfig::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     ?: WalletConfig(id = "wallet")
             }
+            .retryTransientFirestoreErrors("SpiderAdminRepo") { auth.currentUser?.uid == adminUid }
             .catch { logAndRethrow(it, OperationType.GET, "appConfig/wallet", adminUid) }
 
     fun observeAllPayments(adminUid: String): Flow<List<PaymentOrder>> =
@@ -180,6 +202,7 @@ class SpiderAdminRepository(
                 snap.toObjects(PaymentOrder::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedByDescending { it.createdAt?.seconds ?: 0L }
             }
+            .retryTransientFirestoreErrors("SpiderAdminRepo") { auth.currentUser?.uid == adminUid }
             .catch { logAndRethrow(it, OperationType.LIST, "payments", adminUid) }
 
     fun observeAllTransactions(adminUid: String): Flow<List<WalletTransaction>> =
@@ -188,6 +211,7 @@ class SpiderAdminRepository(
                 snap.toObjects(WalletTransaction::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedByDescending { it.createdAt?.seconds ?: 0L }
             }
+            .retryTransientFirestoreErrors("SpiderAdminRepo") { auth.currentUser?.uid == adminUid }
             .catch { logAndRethrow(it, OperationType.LIST, "transactions", adminUid) }
 
     fun observeAllPayouts(adminUid: String): Flow<List<PayoutRequest>> =
@@ -196,6 +220,7 @@ class SpiderAdminRepository(
                 snap.toObjects(PayoutRequest::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedByDescending { it.createdAt?.seconds ?: 0L }
             }
+            .retryTransientFirestoreErrors("SpiderAdminRepo") { auth.currentUser?.uid == adminUid }
             .catch { logAndRethrow(it, OperationType.LIST, "payoutRequests", adminUid) }
 
     fun observeAllTickets(adminUid: String): Flow<List<SupportTicket>> =
@@ -204,6 +229,7 @@ class SpiderAdminRepository(
                 snap.toObjects(SupportTicket::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedByDescending { it.createdAt?.seconds ?: 0L }
             }
+            .retryTransientFirestoreErrors("SpiderAdminRepo") { auth.currentUser?.uid == adminUid }
             .catch { logAndRethrow(it, OperationType.LIST, "supportTickets", adminUid) }
 
     fun observeAllDisputes(adminUid: String): Flow<List<Dispute>> =
@@ -212,6 +238,7 @@ class SpiderAdminRepository(
                 snap.toObjects(Dispute::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedByDescending { it.createdAt?.seconds ?: 0L }
             }
+            .retryTransientFirestoreErrors("SpiderAdminRepo") { auth.currentUser?.uid == adminUid }
             .catch { logAndRethrow(it, OperationType.LIST, "disputes", adminUid) }
 
     fun observeAuditLogs(adminUid: String): Flow<List<AuditLog>> =
@@ -220,6 +247,7 @@ class SpiderAdminRepository(
                 snap.toObjects(AuditLog::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedByDescending { it.createdAt?.seconds ?: 0L }
             }
+            .retryTransientFirestoreErrors("SpiderAdminRepo") { auth.currentUser?.uid == adminUid }
             .catch { logAndRethrow(it, OperationType.LIST, "auditLogs", adminUid) }
 
     fun observeAllReferrals(adminUid: String): Flow<List<ReferralRecord>> =
@@ -228,6 +256,7 @@ class SpiderAdminRepository(
                 snap.toObjects(ReferralRecord::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedByDescending { it.createdAt?.seconds ?: 0L }
             }
+            .retryTransientFirestoreErrors("SpiderAdminRepo") { auth.currentUser?.uid == adminUid }
             .catch { logAndRethrow(it, OperationType.LIST, "referrals", adminUid) }
 
     fun observeAllAdminUsers(adminUid: String): Flow<List<AdminUserRecord>> =
@@ -235,6 +264,7 @@ class SpiderAdminRepository(
             .map { snap ->
                 snap.toObjects(AdminUserRecord::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
             }
+            .retryTransientFirestoreErrors("SpiderAdminRepo") { auth.currentUser?.uid == adminUid }
             .catch { logAndRethrow(it, OperationType.LIST, "adminUsers", adminUid) }
 
     fun observeAllResults(adminUid: String): Flow<List<MatchResult>> =
@@ -243,6 +273,7 @@ class SpiderAdminRepository(
                 snap.toObjects(MatchResult::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedWith(compareBy<MatchResult> { it.tournamentId }.thenBy { it.placement })
             }
+            .retryTransientFirestoreErrors("SpiderAdminRepo") { auth.currentUser?.uid == adminUid }
             .catch { logAndRethrow(it, OperationType.LIST, "results", adminUid) }
 
     suspend fun saveCategory(
@@ -712,7 +743,9 @@ class SpiderAdminRepository(
         bucket: String,
         reason: String
     ): Result<Unit> = runAdminMutation("wallets/$targetUid") { uid, email ->
-        require(amountDelta > 0.0) { "Amount must be greater than 0" }
+        val cleanAmount = SpiderWalletUtil.roundCoins(amountDelta)
+        require(cleanAmount > 0.0) { "Amount must be greater than 0" }
+        val normalizedDir = direction.uppercase(Locale.US)
         val normalizedBucket = bucket.uppercase(Locale.US).let {
             if (it in listOf("WINNING", "BONUS", "DEPOSIT")) it else "BONUS"
         }
@@ -723,69 +756,44 @@ class SpiderAdminRepository(
 
         db.runTransaction { tx ->
             val snap = tx.get(walletRef)
-            val currentDep = snap.getDouble("depositedBalance") ?: 0.0
-            val currentWin = snap.getDouble("winningBalance") ?: 0.0
-            val currentBonus = if (snap.contains("bonusBalance")) {
-                snap.getDouble("bonusBalance") ?: 0.0
-            } else {
-                snap.getDouble("earningsBalance") ?: 0.0
-            }
-            val currentPayout = snap.getDouble("payoutsTotal") ?: 0.0
-
-            val signedDelta = if (direction == "CREDIT") amountDelta else -amountDelta
-            val nextDep = if (normalizedBucket == "DEPOSIT") (currentDep + signedDelta).coerceAtLeast(0.0) else currentDep
-            val nextWin = if (normalizedBucket == "WINNING") (currentWin + signedDelta).coerceAtLeast(0.0) else currentWin
-            val nextBonus = if (normalizedBucket == "BONUS") (currentBonus + signedDelta).coerceAtLeast(0.0) else currentBonus
-            val nextTotal = nextDep + nextWin + nextBonus
+            val currentWallet = SpiderWalletUtil.fromDocumentOrZero(snap)
+            val nextWallet = SpiderWalletUtil.computeAdminAdjustment(
+                current = currentWallet,
+                amountDelta = cleanAmount,
+                direction = normalizedDir,
+                bucket = normalizedBucket
+            )
             val now = FieldValue.serverTimestamp()
 
+            val walletData = nextWallet.toWriteMap(
+                userId = targetUid,
+                now = now,
+                includeCreatedAt = !snap.exists()
+            )
             if (!snap.exists()) {
-                tx.set(
-                    walletRef,
-                    mapOf(
-                        "userId" to targetUid,
-                        "totalBalance" to nextTotal,
-                        "depositedBalance" to nextDep,
-                        "winningBalance" to nextWin,
-                        "bonusBalance" to nextBonus,
-                        "earningsBalance" to nextBonus,
-                        "payoutsTotal" to currentPayout,
-                        "createdAt" to now,
-                        "updatedAt" to now
-                    )
-                )
+                tx.set(walletRef, walletData)
             } else {
-                tx.update(
-                    walletRef,
-                    mapOf(
-                        "totalBalance" to nextTotal,
-                        "depositedBalance" to nextDep,
-                        "winningBalance" to nextWin,
-                        "bonusBalance" to nextBonus,
-                        "earningsBalance" to nextBonus,
-                        "updatedAt" to now
-                    )
-                )
+                tx.update(walletRef, walletData)
             }
 
             val txType = when {
-                direction == "DEBIT" -> "ADMIN_ADJUSTMENT"
+                normalizedDir == "DEBIT" -> "ADMIN_ADJUSTMENT"
                 normalizedBucket == "WINNING" -> "PRIZE"
                 normalizedBucket == "BONUS" -> "BONUS"
                 else -> "DEPOSIT"
             }
-            val descPrefix = "$normalizedBucket ${direction.lowercase(Locale.US)}"
+            val descPrefix = "$normalizedBucket ${normalizedDir.lowercase(Locale.US)}"
             tx.set(
                 txRef,
                 mapOf(
                     "userId" to targetUid,
                     "type" to txType,
-                    "direction" to direction,
+                    "direction" to normalizedDir,
                     "description" to "${reason.trim().ifBlank { "Admin $descPrefix" }} [$normalizedBucket]".take(200),
                     "matchId" to "",
-                    "amount" to amountDelta,
+                    "amount" to cleanAmount,
                     "status" to "COMPLETED",
-                    "resultingBalance" to nextTotal,
+                    "resultingBalance" to nextWallet.total,
                     "createdAt" to now
                 )
             )
@@ -794,7 +802,7 @@ class SpiderAdminRepository(
                 mapOf(
                     "userId" to targetUid,
                     "title" to "Wallet Updated ($normalizedBucket)",
-                    "message" to "${if (direction == "CREDIT") "+" else "-"}${String.format(Locale.US, "%.0f", amountDelta)} Coins in your $normalizedBucket balance. ${reason.trim()}".take(400),
+                    "message" to "${if (normalizedDir == "CREDIT") "+" else "-"}${String.format(Locale.US, "%.0f", cleanAmount)} Coins in your $normalizedBucket balance. ${reason.trim()}".take(400),
                     "type" to txType,
                     "read" to false,
                     "createdAt" to now
@@ -805,10 +813,10 @@ class SpiderAdminRepository(
                 mapOf(
                     "actorId" to uid,
                     "actorEmail" to email,
-                    "action" to "WALLET_${normalizedBucket}_$direction",
+                    "action" to "WALLET_${normalizedBucket}_$normalizedDir",
                     "targetCollection" to "wallets",
                     "targetId" to targetUid,
-                    "summary" to "Adjusted $targetUid [$normalizedBucket] $direction $amountDelta ($reason)".take(400),
+                    "summary" to "Adjusted $targetUid [$normalizedBucket] $normalizedDir $cleanAmount ($reason)".take(400),
                     "createdAt" to now
                 )
             )
@@ -836,42 +844,18 @@ class SpiderAdminRepository(
             val now = FieldValue.serverTimestamp()
 
             if (approve) {
-                val currentDep = walletSnap.getDouble("depositedBalance") ?: 0.0
-                val currentWin = walletSnap.getDouble("winningBalance") ?: 0.0
-                val currentBonus = if (walletSnap.contains("bonusBalance")) {
-                    walletSnap.getDouble("bonusBalance") ?: 0.0
-                } else {
-                    walletSnap.getDouble("earningsBalance") ?: 0.0
-                }
-                val currentPayout = walletSnap.getDouble("payoutsTotal") ?: 0.0
-                val nextDep = currentDep + payment.coinAmount
-                val nextTotal = nextDep + currentWin + currentBonus
-
+                val cleanAmount = SpiderWalletUtil.roundCoins(payment.coinAmount)
+                val currentWallet = SpiderWalletUtil.fromDocumentOrZero(walletSnap)
+                val nextWallet = SpiderWalletUtil.computeDepositApproval(currentWallet, cleanAmount)
+                val walletData = nextWallet.toWriteMap(
+                    userId = payment.userId,
+                    now = now,
+                    includeCreatedAt = !walletSnap.exists()
+                )
                 if (!walletSnap.exists()) {
-                    tx.set(
-                        walletRef,
-                        mapOf(
-                            "userId" to payment.userId,
-                            "totalBalance" to nextTotal,
-                            "depositedBalance" to nextDep,
-                            "winningBalance" to currentWin,
-                            "bonusBalance" to currentBonus,
-                            "earningsBalance" to currentBonus,
-                            "payoutsTotal" to currentPayout,
-                            "createdAt" to now,
-                            "updatedAt" to now
-                        )
-                    )
+                    tx.set(walletRef, walletData)
                 } else {
-                    tx.update(
-                        walletRef,
-                        mapOf(
-                            "totalBalance" to nextTotal,
-                            "depositedBalance" to nextDep,
-                            "bonusBalance" to currentBonus,
-                            "updatedAt" to now
-                        )
-                    )
+                    tx.update(walletRef, walletData)
                 }
                 tx.update(
                     paymentRef,
@@ -885,9 +869,9 @@ class SpiderAdminRepository(
                         "direction" to "CREDIT",
                         "description" to "Deposit approved (Ref: ${payment.referenceId.ifBlank { payment.id }})".take(200),
                         "matchId" to "",
-                        "amount" to payment.coinAmount,
+                        "amount" to cleanAmount,
                         "status" to "COMPLETED",
-                        "resultingBalance" to nextTotal,
+                        "resultingBalance" to nextWallet.total,
                         "createdAt" to now
                     )
                 )
@@ -896,7 +880,7 @@ class SpiderAdminRepository(
                     mapOf(
                         "userId" to payment.userId,
                         "title" to "Deposit Approved",
-                        "message" to "+${payment.coinAmount.toInt()} Coins credited to your Deposit balance.",
+                        "message" to "+${cleanAmount.toInt()} Coins credited to your Deposit balance.",
                         "type" to "DEPOSIT",
                         "read" to false,
                         "createdAt" to now
@@ -942,85 +926,130 @@ class SpiderAdminRepository(
         val payoutRef = db.collection("payoutRequests").document(payout.id)
         val walletRef = db.collection("wallets").document(payout.userId)
         val txRef = db.collection("transactions").document("tx_out_${payout.id}")
+        val revTxRef = db.collection("transactions").document("tx_out_rev_${payout.id}")
         val notifRef = db.collection("notifications").document("notif_out_${payout.id}")
         val auditRef = db.collection("auditLogs").document()
 
         db.runTransaction { tx ->
+            // All reads MUST precede all writes in Firestore transactions
             val payoutSnap = tx.get(payoutRef)
             if (!payoutSnap.exists()) throw IllegalStateException("Withdrawal request not found.")
             if (payoutSnap.getString("status") != "PENDING") {
                 throw IllegalStateException("Withdrawal request already processed.")
             }
             val walletSnap = tx.get(walletRef)
+            val existingTxSnap = tx.get(txRef)
             val now = FieldValue.serverTimestamp()
 
-            if (approve) {
-                require(payout.amount >= 50.0) { "Minimum withdrawal is 50 Coins." }
-                val currentDep = walletSnap.getDouble("depositedBalance") ?: 0.0
-                val currentWin = walletSnap.getDouble("winningBalance") ?: 0.0
-                val currentBonus = if (walletSnap.contains("bonusBalance")) {
-                    walletSnap.getDouble("bonusBalance") ?: 0.0
-                } else {
-                    walletSnap.getDouble("earningsBalance") ?: 0.0
-                }
-                val currentPayout = walletSnap.getDouble("payoutsTotal") ?: 0.0
-                if (currentWin < payout.amount) {
-                    throw IllegalStateException("Insufficient Winning balance (${currentWin.toInt()} Coins) for ${payout.amount.toInt()} Coins payout.")
-                }
-                val nextWin = currentWin - payout.amount
-                val nextPayout = currentPayout + payout.amount
-                val nextTotal = currentDep + nextWin + currentBonus
+            val wasHeldOnSubmit = existingTxSnap.exists() && existingTxSnap.getString("status") == "PENDING"
+            val cleanAmount = SpiderWalletUtil.roundCoins(payout.amount)
+            val currentWallet = SpiderWalletUtil.fromDocumentOrZero(walletSnap)
+            val nextWallet = SpiderWalletUtil.computePayoutReview(
+                current = currentWallet,
+                coinAmount = cleanAmount,
+                approve = approve,
+                wasHeldOnSubmit = wasHeldOnSubmit
+            )
 
-                tx.update(
-                    walletRef,
-                    mapOf(
-                        "totalBalance" to nextTotal,
-                        "winningBalance" to nextWin,
-                        "payoutsTotal" to nextPayout,
-                        "updatedAt" to now
-                    )
+            if (approve) {
+                val walletData = nextWallet.toWriteMap(
+                    userId = payout.userId,
+                    now = now,
+                    includeCreatedAt = !walletSnap.exists()
                 )
+                if (!walletSnap.exists()) {
+                    tx.set(walletRef, walletData)
+                } else {
+                    tx.update(walletRef, walletData)
+                }
                 tx.update(
                     payoutRef,
                     mapOf("status" to "PAID", "reviewedBy" to adminEmail, "updatedAt" to now)
                 )
-                tx.set(
-                    txRef,
-                    mapOf(
-                        "userId" to payout.userId,
-                        "type" to "PAYOUT",
-                        "direction" to "DEBIT",
-                        "description" to "Winning payout paid via ${payout.destinationType} (${payout.destinationDetails})".take(200),
-                        "matchId" to "",
-                        "amount" to payout.amount,
-                        "status" to "COMPLETED",
-                        "resultingBalance" to nextTotal,
-                        "createdAt" to now
+                val paidDesc = "Winning payout paid via ${payout.destinationType} (${payout.destinationDetails})".take(200)
+                if (existingTxSnap.exists()) {
+                    tx.update(
+                        txRef,
+                        mapOf(
+                            "description" to paidDesc,
+                            "status" to "COMPLETED",
+                            "resultingBalance" to nextWallet.total
+                        )
                     )
-                )
+                } else {
+                    tx.set(
+                        txRef,
+                        mapOf(
+                            "userId" to payout.userId,
+                            "type" to "PAYOUT",
+                            "direction" to "DEBIT",
+                            "description" to paidDesc,
+                            "matchId" to "",
+                            "amount" to cleanAmount,
+                            "status" to "COMPLETED",
+                            "resultingBalance" to nextWallet.total,
+                            "createdAt" to now
+                        )
+                    )
+                }
                 tx.set(
                     notifRef,
                     mapOf(
                         "userId" to payout.userId,
                         "title" to "Withdrawal Paid",
-                        "message" to "₹${payout.amount.toInt()} (${payout.amount.toInt()} Winning Coins) sent to ${payout.destinationDetails.ifBlank { payout.destinationType }}.",
+                        "message" to "₹${cleanAmount.toInt()} (${cleanAmount.toInt()} Winning Coins) sent to ${payout.destinationDetails.ifBlank { payout.destinationType }}.",
                         "type" to "PAYOUT",
                         "read" to false,
                         "createdAt" to now
                     )
                 )
             } else {
+                if (wasHeldOnSubmit) {
+                    val walletData = nextWallet.toWriteMap(
+                        userId = payout.userId,
+                        now = now,
+                        includeCreatedAt = !walletSnap.exists()
+                    )
+                    if (!walletSnap.exists()) {
+                        tx.set(walletRef, walletData)
+                    } else {
+                        tx.update(walletRef, walletData)
+                    }
+                    tx.update(
+                        txRef,
+                        mapOf("status" to "REVERSED")
+                    )
+                    tx.set(
+                        revTxRef,
+                        mapOf(
+                            "userId" to payout.userId,
+                            "type" to "REFUND",
+                            "direction" to "CREDIT",
+                            "description" to "Withdrawal rejected refund (${payout.destinationType})".take(200),
+                            "matchId" to "",
+                            "amount" to cleanAmount,
+                            "status" to "COMPLETED",
+                            "resultingBalance" to nextWallet.total,
+                            "createdAt" to now
+                        )
+                    )
+                }
                 tx.update(
                     payoutRef,
                     mapOf("status" to "REJECTED", "reviewedBy" to adminEmail, "updatedAt" to now)
                 )
+                val rejectMsg = if (wasHeldOnSubmit) {
+                    "Your ${cleanAmount.toInt()} Coins withdrawal was rejected and refunded to Winning balance. ${note.trim()}"
+                } else {
+                    "Your ${cleanAmount.toInt()} Coins withdrawal was rejected. ${note.trim()}"
+                }
                 tx.set(
                     notifRef,
                     mapOf(
                         "userId" to payout.userId,
-                        "title" to "Withdrawal Rejected",
-                        "message" to "Your ${payout.amount.toInt()} Coins withdrawal was rejected. ${note.trim()}".take(400),
-                        "type" to "PAYOUT",
+                        "title" to if (wasHeldOnSubmit) "Withdrawal Rejected & Refunded" else "Withdrawal Rejected",
+                        "message" to rejectMsg.take(400),
+                        "type" to if (wasHeldOnSubmit) "REFUND" else "PAYOUT",
                         "read" to false,
                         "createdAt" to now
                     )
@@ -1034,14 +1063,12 @@ class SpiderAdminRepository(
                     "action" to if (approve) "APPROVE_PAYOUT" else "REJECT_PAYOUT",
                     "targetCollection" to "payoutRequests",
                     "targetId" to payout.id,
-                    "summary" to "${if (approve) "Paid" else "Rejected"} withdrawal ${payout.amount.toInt()} Coins for ${payout.userId}".take(400),
+                    "summary" to "${if (approve) "Paid" else "Rejected"} withdrawal ${cleanAmount.toInt()} Coins for ${payout.userId}".take(400),
                     "createdAt" to now
                 )
             )
         }.await()
     }
-
-    private fun roundCoins(value: Double): Double = kotlin.math.round(value * 100.0) / 100.0
 
     private fun placementPoints(placement: Long): Long = when (placement) {
         1L -> 100L
@@ -1065,7 +1092,7 @@ class SpiderAdminRepository(
         require(cleanName.isNotEmpty()) { "Player name is required." }
         val cleanPlacement = placement.coerceIn(1L, 500L)
         val cleanKills = kills.coerceIn(0L, 200L)
-        val cleanReward = roundCoins(rewardCoins.coerceAtLeast(0.0))
+        val cleanReward = SpiderWalletUtil.roundCoins(rewardCoins.coerceAtLeast(0.0))
         val cleanTitle = tournamentTitle.trim().take(80).let { if (it.length < 2) "Match" else it }
         val allowedModes = setOf("OVERALL", "WEEKLY", "MONTHLY", "SOLO", "DUO", "LONE_WOLF", "CLASH_SQUAD")
         val normalizedMode = if (leaderboardMode in allowedModes) leaderboardMode else "SOLO"
@@ -1156,45 +1183,20 @@ class SpiderAdminRepository(
 
                 val alreadyCredited = existingPrizeTx.exists()
                 val prevAmount = if (alreadyCredited) (existingPrizeTx.getDouble("amount") ?: 0.0) else 0.0
-                val delta = roundCoins(cleanReward - prevAmount)
+                val delta = SpiderWalletUtil.roundCoins(cleanReward - prevAmount)
 
                 if ((!alreadyCredited && cleanReward > 0.0) || (alreadyCredited && kotlin.math.abs(delta) >= 0.01)) {
-                    val currentDep = walletSnap.getDouble("depositedBalance") ?: 0.0
-                    val currentWin = walletSnap.getDouble("winningBalance") ?: 0.0
-                    val currentBonus = if (walletSnap.contains("bonusBalance")) {
-                        walletSnap.getDouble("bonusBalance") ?: 0.0
-                    } else {
-                        walletSnap.getDouble("earningsBalance") ?: 0.0
-                    }
-                    val currentPayout = walletSnap.getDouble("payoutsTotal") ?: 0.0
-                    val nextWin = roundCoins((currentWin + delta).coerceAtLeast(0.0))
-                    val nextTotal = roundCoins(currentDep + nextWin + currentBonus)
-
+                    val currentWallet = SpiderWalletUtil.fromDocumentOrZero(walletSnap)
+                    val nextWallet = SpiderWalletUtil.computeWinningPrizeUpdate(currentWallet, delta)
+                    val walletData = nextWallet.toWriteMap(
+                        userId = linkedUid,
+                        now = now,
+                        includeCreatedAt = !walletSnap.exists()
+                    )
                     if (!walletSnap.exists()) {
-                        tx.set(
-                            walletRef,
-                            mapOf(
-                                "userId" to linkedUid,
-                                "totalBalance" to nextTotal,
-                                "depositedBalance" to currentDep,
-                                "winningBalance" to nextWin,
-                                "bonusBalance" to currentBonus,
-                                "earningsBalance" to currentBonus,
-                                "payoutsTotal" to currentPayout,
-                                "createdAt" to now,
-                                "updatedAt" to now
-                            )
-                        )
+                        tx.set(walletRef, walletData)
                     } else {
-                        tx.update(
-                            walletRef,
-                            mapOf(
-                                "totalBalance" to nextTotal,
-                                "winningBalance" to nextWin,
-                                "bonusBalance" to currentBonus,
-                                "updatedAt" to now
-                            )
-                        )
+                        tx.update(walletRef, walletData)
                     }
                     if (!alreadyCredited) {
                         tx.set(
@@ -1207,7 +1209,7 @@ class SpiderAdminRepository(
                                 "matchId" to tournamentId,
                                 "amount" to cleanReward,
                                 "status" to "COMPLETED",
-                                "resultingBalance" to nextTotal,
+                                "resultingBalance" to nextWallet.total,
                                 "createdAt" to now
                             )
                         )
@@ -1228,7 +1230,7 @@ class SpiderAdminRepository(
                             mapOf(
                                 "description" to "Prize for #$cleanPlacement in $cleanTitle ($cleanKills kills)".take(200),
                                 "amount" to cleanReward,
-                                "resultingBalance" to nextTotal
+                                "resultingBalance" to nextWallet.total
                             )
                         )
                     }
@@ -1288,7 +1290,8 @@ class SpiderAdminRepository(
         body: String,
         category: String,
         telegramUrl: String,
-        whatsappUrl: String
+        whatsappUrl: String,
+        whatsappBannerUrl: String = ""
     ): Result<Unit> = runAdminMutation("announcements/$id") { uid, email ->
         val now = FieldValue.serverTimestamp()
         val batch = db.batch()
@@ -1300,6 +1303,7 @@ class SpiderAdminRepository(
                 "category" to category,
                 "telegramUrl" to telegramUrl.trim().take(300),
                 "whatsappUrl" to whatsappUrl.trim().take(300),
+                "whatsappBannerUrl" to whatsappBannerUrl.trim().take(200000),
                 "priority" to 1L,
                 "enabled" to true,
                 "createdAt" to now,
@@ -1362,43 +1366,20 @@ class SpiderAdminRepository(
                 throw IllegalStateException("Referral has already been processed (${refSnap.getString("status")}).")
             }
 
-            val currentDep = walletSnap.getDouble("depositedBalance") ?: 0.0
-            val currentWin = walletSnap.getDouble("winningBalance") ?: 0.0
-            val currentBonus = if (walletSnap.contains("bonusBalance")) {
-                walletSnap.getDouble("bonusBalance") ?: 0.0
-            } else {
-                walletSnap.getDouble("earningsBalance") ?: 0.0
-            }
-            val currentPayout = walletSnap.getDouble("payoutsTotal") ?: 0.0
-            val nextBonus = currentBonus + bonusCoins
-            val nextTotal = currentDep + currentWin + nextBonus
+            val cleanBonus = SpiderWalletUtil.roundCoins(bonusCoins)
+            val currentWallet = SpiderWalletUtil.fromDocumentOrZero(walletSnap)
+            val nextWallet = SpiderWalletUtil.computeBonusCredit(currentWallet, cleanBonus)
             val now = FieldValue.serverTimestamp()
 
+            val walletData = nextWallet.toWriteMap(
+                userId = referral.referrerUid,
+                now = now,
+                includeCreatedAt = !walletSnap.exists()
+            )
             if (!walletSnap.exists()) {
-                tx.set(
-                    walletRef,
-                    mapOf(
-                        "userId" to referral.referrerUid,
-                        "totalBalance" to nextTotal,
-                        "depositedBalance" to currentDep,
-                        "winningBalance" to currentWin,
-                        "bonusBalance" to nextBonus,
-                        "earningsBalance" to nextBonus,
-                        "payoutsTotal" to currentPayout,
-                        "createdAt" to now,
-                        "updatedAt" to now
-                    )
-                )
+                tx.set(walletRef, walletData)
             } else {
-                tx.update(
-                    walletRef,
-                    mapOf(
-                        "totalBalance" to nextTotal,
-                        "bonusBalance" to nextBonus,
-                        "earningsBalance" to nextBonus,
-                        "updatedAt" to now
-                    )
-                )
+                tx.update(walletRef, walletData)
             }
 
             tx.set(
@@ -1409,9 +1390,9 @@ class SpiderAdminRepository(
                     "direction" to "CREDIT",
                     "description" to "Referral bonus for inviting ${referral.referredUsername}".take(200),
                     "matchId" to "",
-                    "amount" to bonusCoins,
+                    "amount" to cleanBonus,
                     "status" to "COMPLETED",
-                    "resultingBalance" to nextTotal,
+                    "resultingBalance" to nextWallet.total,
                     "createdAt" to now
                 )
             )
@@ -1420,7 +1401,7 @@ class SpiderAdminRepository(
                 referralRef,
                 mapOf(
                     "status" to "CREDITED",
-                    "bonusAmount" to bonusCoins,
+                    "bonusAmount" to cleanBonus,
                     "transactionId" to txRef.id,
                     "updatedAt" to now
                 )
@@ -1431,7 +1412,7 @@ class SpiderAdminRepository(
                 mapOf(
                     "userId" to referral.referrerUid,
                     "title" to "Referral Bonus Credited",
-                    "message" to "+${String.format(Locale.US, "%.0f", bonusCoins)} Coins credited for referring ${referral.referredUsername}.",
+                    "message" to "+${String.format(Locale.US, "%.0f", cleanBonus)} Coins credited for referring ${referral.referredUsername}.",
                     "type" to "REFERRAL_BONUS",
                     "read" to false,
                     "createdAt" to now
@@ -1446,7 +1427,7 @@ class SpiderAdminRepository(
                     "action" to "APPROVE_REFERRAL_BONUS",
                     "targetCollection" to "referrals",
                     "targetId" to refDocId,
-                    "summary" to "Credited $bonusCoins Coins to ${referral.referrerUsername} for referring ${referral.referredUsername}".take(400),
+                    "summary" to "Credited $cleanBonus Coins to ${referral.referrerUsername} for referring ${referral.referredUsername}".take(400),
                     "createdAt" to now
                 )
             )

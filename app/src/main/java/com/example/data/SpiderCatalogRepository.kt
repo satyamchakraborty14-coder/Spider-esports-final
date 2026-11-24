@@ -39,6 +39,7 @@ class SpiderCatalogRepository(
                 snap.toObjects(TournamentCategory::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedBy { it.displayOrder }
             }
+            .retryTransientFirestoreErrors("SpiderCatalogRepo") { auth.currentUser?.uid == userId }
             .catch { logAndRethrow(it, OperationType.LIST, "tournamentCategories", userId) }
 
     fun observeEnabledBanners(userId: String): Flow<List<PromoBanner>> =
@@ -49,6 +50,7 @@ class SpiderCatalogRepository(
                 snap.toObjects(PromoBanner::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedBy { it.displayOrder }
             }
+            .retryTransientFirestoreErrors("SpiderCatalogRepo") { auth.currentUser?.uid == userId }
             .catch { logAndRethrow(it, OperationType.LIST, "banners", userId) }
 
     fun observeEnabledAnnouncements(userId: String): Flow<List<Announcement>> =
@@ -59,6 +61,7 @@ class SpiderCatalogRepository(
                 snap.toObjects(Announcement::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedBy { it.priority }
             }
+            .retryTransientFirestoreErrors("SpiderCatalogRepo") { auth.currentUser?.uid == userId }
             .catch { logAndRethrow(it, OperationType.LIST, "announcements", userId) }
 
     fun observePublicTournaments(userId: String): Flow<List<Tournament>> =
@@ -70,6 +73,7 @@ class SpiderCatalogRepository(
                     .filter { it.status != "ARCHIVED" }
                     .sortedByDescending { it.createdAt?.seconds ?: 0L }
             }
+            .retryTransientFirestoreErrors("SpiderCatalogRepo") { auth.currentUser?.uid == userId }
             .catch { logAndRethrow(it, OperationType.LIST, "tournaments", userId) }
 
     fun observeUserRegistrations(userId: String): Flow<List<Registration>> =
@@ -80,6 +84,7 @@ class SpiderCatalogRepository(
                 snap.toObjects(Registration::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedByDescending { it.createdAt?.seconds ?: 0L }
             }
+            .retryTransientFirestoreErrors("SpiderCatalogRepo") { auth.currentUser?.uid == userId }
             .catch { logAndRethrow(it, OperationType.LIST, "registrations", userId) }
 
     fun observeUserMatches(userId: String): Flow<List<MatchRecord>> =
@@ -90,6 +95,7 @@ class SpiderCatalogRepository(
                 snap.toObjects(MatchRecord::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedByDescending { it.updatedAt?.seconds ?: 0L }
             }
+            .retryTransientFirestoreErrors("SpiderCatalogRepo") { auth.currentUser?.uid == userId }
             .catch { logAndRethrow(it, OperationType.LIST, "matches", userId) }
 
     fun observeVerifiedResults(userId: String): Flow<List<MatchResult>> =
@@ -100,6 +106,7 @@ class SpiderCatalogRepository(
                 snap.toObjects(MatchResult::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedByDescending { it.createdAt?.seconds ?: 0L }
             }
+            .retryTransientFirestoreErrors("SpiderCatalogRepo") { auth.currentUser?.uid == userId }
             .catch { logAndRethrow(it, OperationType.LIST, "results", userId) }
 
     fun observeVerifiedLeaderboards(userId: String): Flow<List<LeaderboardEntry>> =
@@ -110,6 +117,7 @@ class SpiderCatalogRepository(
                 snap.toObjects(LeaderboardEntry::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedByDescending { it.rankingPoints }
             }
+            .retryTransientFirestoreErrors("SpiderCatalogRepo") { auth.currentUser?.uid == userId }
             .catch { logAndRethrow(it, OperationType.LIST, "leaderboards", userId) }
 
     fun observeTournamentParticipants(tournamentId: String, userId: String): Flow<List<TournamentParticipant>> =
@@ -120,6 +128,7 @@ class SpiderCatalogRepository(
                 snap.toObjects(TournamentParticipant::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedBy { it.createdAt?.seconds ?: Long.MAX_VALUE }
             }
+            .retryTransientFirestoreErrors("SpiderCatalogRepo") { auth.currentUser?.uid == userId }
             .catch { logAndRethrow(it, OperationType.LIST, "tournaments/$tournamentId/participants", userId) }
 
     suspend fun fetchRoomCredential(tournamentId: String): Result<RoomCredential?> {
@@ -207,44 +216,17 @@ class SpiderCatalogRepository(
                     if (!walletSnap.exists()) {
                         throw IllegalStateException("Insufficient coins (0 Coins available, ${liveFee.toInt()} Coins required). Add coins in Wallet to join.")
                     }
-                    val currentDep = (walletSnap.getDouble("depositedBalance") ?: 0.0).coerceAtLeast(0.0)
-                    val currentWin = (walletSnap.getDouble("winningBalance") ?: 0.0).coerceAtLeast(0.0)
-                    val currentBonus = (
-                        if (walletSnap.contains("bonusBalance")) {
-                            walletSnap.getDouble("bonusBalance") ?: 0.0
-                        } else {
-                            walletSnap.getDouble("earningsBalance") ?: 0.0
-                        }
-                    ).coerceAtLeast(0.0)
-                    val currentTotal = roundCoins(currentDep + currentWin + currentBonus)
-                    if (currentTotal + 0.001 < liveFee) {
-                        throw IllegalStateException(
-                            "Insufficient coins (${currentTotal.toInt()} Coins available, ${liveFee.toInt()} Coins required). Add coins in Wallet to join."
-                        )
-                    }
-
-                    var remaining = liveFee
-                    val depUsed = minOf(currentDep, remaining)
-                    val nextDep = roundCoins((currentDep - depUsed).coerceAtLeast(0.0))
-                    remaining = roundCoins((remaining - depUsed).coerceAtLeast(0.0))
-
-                    val bonusUsed = minOf(currentBonus, remaining)
-                    val nextBonus = roundCoins((currentBonus - bonusUsed).coerceAtLeast(0.0))
-                    remaining = roundCoins((remaining - bonusUsed).coerceAtLeast(0.0))
-
-                    val winUsed = minOf(currentWin, remaining)
-                    val nextWin = roundCoins((currentWin - winUsed).coerceAtLeast(0.0))
-
-                    val nextTotal = roundCoins(nextDep + nextWin + nextBonus)
+                    val currentWallet = SpiderWalletUtil.fromDocumentOrZero(walletSnap)
+                    val nextWallet = SpiderWalletUtil.computeTournamentJoinDebit(currentWallet, liveFee)
 
                     tx.update(
                         walletRef,
                         mapOf(
-                            "totalBalance" to nextTotal,
-                            "depositedBalance" to nextDep,
-                            "winningBalance" to nextWin,
-                            "bonusBalance" to nextBonus,
-                            "earningsBalance" to nextBonus,
+                            "totalBalance" to nextWallet.total,
+                            "depositedBalance" to nextWallet.deposited,
+                            "winningBalance" to nextWallet.winning,
+                            "bonusBalance" to nextWallet.bonus,
+                            "earningsBalance" to nextWallet.bonus,
                             "updatedAt" to now
                         )
                     )
@@ -258,7 +240,7 @@ class SpiderCatalogRepository(
                             "matchId" to tournament.id,
                             "amount" to liveFee,
                             "status" to "COMPLETED",
-                            "resultingBalance" to nextTotal,
+                            "resultingBalance" to nextWallet.total,
                             "createdAt" to now
                         )
                     )

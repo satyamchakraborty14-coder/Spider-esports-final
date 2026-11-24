@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CurrencyRupee
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Savings
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
@@ -50,6 +51,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -106,18 +108,38 @@ fun WalletScreen(
     payoutRequests: List<PayoutRequest>,
     onSubmitDeposit: (Double, String, (Boolean, String?) -> Unit) -> Unit,
     onSubmitWithdrawal: (Double, String, String, (Boolean, String?) -> Unit) -> Unit,
+    onRefreshWallet: () -> Unit = {},
     onBack: () -> Unit
 ) {
     var showAddCoinsDialog by remember { mutableStateOf(false) }
     var showRedeemDialog by remember { mutableStateOf(false) }
     val minWithdraw = walletConfig.minWithdraw.coerceAtLeast(50.0)
 
+    LaunchedEffect(Unit) {
+        onRefreshWallet()
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(SpiderBlack)
     ) {
-        SpiderBackTopBar(title = "My Wallet", onBack = onBack)
+        SpiderBackTopBar(
+            title = "My Wallet",
+            onBack = onBack,
+            trailing = {
+                IconButton(
+                    onClick = onRefreshWallet,
+                    modifier = Modifier.testTag("refresh_wallet_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Refresh,
+                        contentDescription = "Refresh Wallet",
+                        tint = TextPrimary
+                    )
+                }
+            }
+        )
 
         LazyColumn(
             contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 100.dp),

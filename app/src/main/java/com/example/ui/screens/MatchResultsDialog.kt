@@ -533,7 +533,9 @@ fun AdminTournamentResultsDialog(
                 }
                 if (regMatch != null) users.firstOrNull { it.userId == regMatch.userId }
                 else users.firstOrNull {
-                    it.inGameName.equals(q, ignoreCase = true) || it.username.equals(q, ignoreCase = true)
+                    it.inGameName.equals(q, ignoreCase = true) ||
+                        it.username.equals(q, ignoreCase = true) ||
+                        it.displayName.equals(q, ignoreCase = true)
                 }
             }
         }

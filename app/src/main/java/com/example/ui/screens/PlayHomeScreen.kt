@@ -1,7 +1,6 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -56,13 +55,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.R
 import com.example.model.Announcement
 import com.example.model.MatchRecord
 import com.example.model.MatchResult
@@ -108,6 +105,7 @@ fun PlayHomeScreen(
     registrations: List<Registration>,
     results: List<MatchResult> = emptyList(),
     currentUserId: String = "",
+    whatsappBannerUrl: String = "",
     onLanguageChange: (String) -> Unit,
     onSupportClick: () -> Unit,
     onWalletClick: () -> Unit,
@@ -376,8 +374,9 @@ fun PlayHomeScreen(
                             .aspectRatio(16f / 9f)
                             .testTag("whatsapp_channel_promo_banner")
                     ) {
-                        Image(
-                            painter = painterResource(id = R.drawable.img_banner_whatsapp_channel_1795509869270),
+                        SpiderArtworkImage(
+                            imageUrl = whatsappBannerUrl,
+                            presetKey = "whatsapp_channel",
                             contentDescription = "Join our WhatsApp Channel",
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()

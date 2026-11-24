@@ -424,6 +424,7 @@
         "category": { "type": "string", "enum": ["IMPORTANT", "RULES", "ALERT", "SUPPORT_CONFIG"] },
         "telegramUrl": { "type": "string" },
         "whatsappUrl": { "type": "string" },
+        "whatsappBannerUrl": { "type": "string" },
         "priority": { "type": "integer" },
         "enabled": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" },

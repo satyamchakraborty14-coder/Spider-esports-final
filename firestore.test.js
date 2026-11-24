@@ -677,3 +677,154 @@ test("Map Banners: admin can save/update/delete map banners; regular users can r
   await assertFails(aliceDb.collection("mapBanners").doc("map_bermuda").delete());
 });
 
+test("Withdrawal submission atomically holds winningBalance + totalBalance and creates PENDING tx_out; unbacked or forged writes fail", async () => {
+  const now = new Date(Date.now() - 5000);
+  await seedUserAndTournament({ entryFee: 0, seedWallet: false });
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const adminDb = ctx.firestore(DATABASE_ID);
+    await adminDb.collection("wallets").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      totalBalance: 150,
+      depositedBalance: 25,
+      winningBalance: 100,
+      bonusBalance: 25,
+      earningsBalance: 25,
+      payoutsTotal: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
+
+  const aliceDb = dbForUser(ALICE_UID, "alice@gmail.com");
+  const adminDb = dbForUser("admin_uid_1", "satyamchakraborty14@gmail.com");
+  const txNow = new Date(Date.now() - 1000);
+
+  // User cannot create payoutRequest without debiting wallet & creating tx_out_
+  await assertFails(
+    aliceDb.collection("payoutRequests").doc("payout_unbacked").set({
+      userId: ALICE_UID,
+      amount: 60,
+      destinationType: "UPI",
+      destinationDetails: "alice@upi",
+      status: "PENDING",
+      reviewedBy: "",
+      createdAt: txNow,
+      updatedAt: txNow,
+    })
+  );
+
+  // Atomic withdrawal request holds 60 Winning Coins immediately: winning 100 -> 40, total 150 -> 90
+  await assertSucceeds(
+    aliceDb.runTransaction(async (tx) => {
+      const payoutRef = aliceDb.collection("payoutRequests").doc("payout_hold_1");
+      const walletRef = aliceDb.collection("wallets").doc(ALICE_UID);
+      const txRef = aliceDb.collection("transactions").doc("tx_out_payout_hold_1");
+      tx.set(payoutRef, {
+        userId: ALICE_UID,
+        amount: 60,
+        destinationType: "UPI",
+        destinationDetails: "alice@upi",
+        status: "PENDING",
+        reviewedBy: "",
+        createdAt: txNow,
+        updatedAt: txNow,
+      });
+      tx.update(walletRef, {
+        totalBalance: 90,
+        depositedBalance: 25,
+        winningBalance: 40,
+        bonusBalance: 25,
+        earningsBalance: 25,
+        updatedAt: txNow,
+      });
+      tx.set(txRef, {
+        userId: ALICE_UID,
+        type: "PAYOUT",
+        direction: "DEBIT",
+        description: "Withdrawal requested via UPI (alice@upi)",
+        matchId: "",
+        amount: 60,
+        status: "PENDING",
+        resultingBalance: 90,
+        createdAt: txNow,
+      });
+    })
+  );
+
+  // Admin can reject and refund held payout back to winningBalance + mark tx_out REVERSED + create REFUND tx
+  const revNow = new Date(Date.now() - 500);
+  await assertSucceeds(
+    adminDb.runTransaction(async (tx) => {
+      const payoutRef = adminDb.collection("payoutRequests").doc("payout_hold_1");
+      const walletRef = adminDb.collection("wallets").doc(ALICE_UID);
+      const txRef = adminDb.collection("transactions").doc("tx_out_payout_hold_1");
+      const revTxRef = adminDb.collection("transactions").doc("tx_out_rev_payout_hold_1");
+      tx.update(payoutRef, {
+        status: "REJECTED",
+        reviewedBy: "satyamchakraborty14@gmail.com",
+        updatedAt: revNow,
+      });
+      tx.update(walletRef, {
+        totalBalance: 150,
+        depositedBalance: 25,
+        winningBalance: 100,
+        bonusBalance: 25,
+        earningsBalance: 25,
+        updatedAt: revNow,
+      });
+      tx.update(txRef, {
+        status: "REVERSED",
+        resultingBalance: 150,
+      });
+      tx.set(revTxRef, {
+        userId: ALICE_UID,
+        type: "REFUND",
+        direction: "CREDIT",
+        description: "Withdrawal rejected & refunded (60 Coins)",
+        matchId: "",
+        amount: 60,
+        status: "COMPLETED",
+        resultingBalance: 150,
+        createdAt: revNow,
+      });
+    })
+  );
+});
+
+test("Support config announcement allows admin to upload custom whatsappBannerUrl and users to read", async () => {
+  const adminDb = dbForUser("admin_uid_1", "satyamchakraborty14@gmail.com");
+  const aliceDb = dbForUser(ALICE_UID, "alice@gmail.com");
+  const now = new Date(Date.now() - 1000);
+
+  await assertSucceeds(
+    adminDb.collection("announcements").doc("ann_support_links").set({
+      title: "Official Support Channels",
+      body: "Reach tournament marshals via Telegram Support or join our official WhatsApp Channel.",
+      category: "SUPPORT_CONFIG",
+      telegramUrl: "https://t.me/spideresports_official",
+      whatsappUrl: "https://whatsapp.com/channel/0029VaTestChannel",
+      whatsappBannerUrl: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/",
+      priority: 1,
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
+  const snap = await assertSucceeds(
+    aliceDb.collection("announcements").where("enabled", "==", true).get()
+  );
+  if (snap.size !== 1 || !snap.docs[0].data().whatsappBannerUrl.startsWith("data:image/jpeg")) {
+    throw new Error("Expected custom whatsappBannerUrl on announcement");
+  }
+
+  // Non-admin cannot modify support config announcement
+  await assertFails(
+    aliceDb.collection("announcements").doc("ann_support_links").update({
+      whatsappBannerUrl: "https://evil.example.com/fake.png",
+      updatedAt: now,
+    })
+  );
+});
+
+

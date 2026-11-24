@@ -19,6 +19,7 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.firestore.Source
 import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
@@ -428,6 +429,7 @@ class SpiderUserRepository(
         db.collection("users").document(userId)
             .snapshots()
             .map { snap -> snap.toObject(UserProfile::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE) }
+            .retryTransientFirestoreErrors("SpiderUserRepo") { auth.currentUser?.uid == userId }
             .catch { error ->
                 logStreamError(error, OperationType.GET, "users/$userId", userId)
                 throw error
@@ -441,6 +443,7 @@ class SpiderUserRepository(
                 snap.toObjects(ReferralRecord::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedByDescending { it.createdAt?.seconds ?: 0L }
             }
+            .retryTransientFirestoreErrors("SpiderUserRepo") { auth.currentUser?.uid == userId }
             .catch { error ->
                 logStreamError(error, OperationType.LIST, "referrals", userId)
                 throw error
@@ -450,6 +453,7 @@ class SpiderUserRepository(
         db.collection("referrals").document(userId)
             .snapshots()
             .map { snap -> snap.toObject(ReferralRecord::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE) }
+            .retryTransientFirestoreErrors("SpiderUserRepo") { auth.currentUser?.uid == userId }
             .catch { error ->
                 logStreamError(error, OperationType.GET, "referrals/$userId", userId)
                 throw error
@@ -634,19 +638,32 @@ class SpiderUserRepository(
     fun observeWallet(userId: String): Flow<Wallet> =
         db.collection("wallets").document(userId)
             .snapshots()
-            .map { snap ->
-                val raw = snap.toObject(Wallet::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-                    ?: Wallet(id = userId, userId = userId)
-                if (!snap.contains("bonusBalance") && raw.earningsBalance > 0.0) {
-                    raw.copy(bonusBalance = raw.earningsBalance)
-                } else {
-                    raw
-                }
-            }
+            .map { snap -> SpiderWalletUtil.parseWalletSnapshot(snap, userId) }
+            .retryTransientFirestoreErrors("SpiderUserRepo") { auth.currentUser?.uid == userId }
             .catch { error ->
                 logStreamError(error, OperationType.GET, "wallets/$userId", userId)
                 throw error
             }
+
+    suspend fun fetchWallet(userId: String): Result<Wallet> {
+        val path = "wallets/$userId"
+        return try {
+            val docRef = db.collection("wallets").document(userId)
+            val snap = try {
+                docRef.get(Source.SERVER).await()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                docRef.get().await()
+            }
+            Result.success(SpiderWalletUtil.parseWalletSnapshot(snap, userId))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.GET, path)
+            Result.failure(e)
+        }
+    }
 
     fun observeWalletConfig(userId: String): Flow<WalletConfig> =
         db.collection("appConfig").document("wallet")
@@ -655,6 +672,7 @@ class SpiderUserRepository(
                 snap.toObject(WalletConfig::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     ?: WalletConfig(id = "wallet")
             }
+            .retryTransientFirestoreErrors("SpiderUserRepo") { auth.currentUser?.uid == userId }
             .catch { error ->
                 logStreamError(error, OperationType.GET, "appConfig/wallet", userId)
                 throw error
@@ -668,6 +686,7 @@ class SpiderUserRepository(
                 snap.toObjects(PaymentOrder::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedByDescending { it.createdAt?.seconds ?: 0L }
             }
+            .retryTransientFirestoreErrors("SpiderUserRepo") { auth.currentUser?.uid == userId }
             .catch { error ->
                 logStreamError(error, OperationType.LIST, "payments", userId)
                 throw error
@@ -681,6 +700,7 @@ class SpiderUserRepository(
                 snap.toObjects(WalletTransaction::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedByDescending { it.createdAt?.seconds ?: 0L }
             }
+            .retryTransientFirestoreErrors("SpiderUserRepo") { auth.currentUser?.uid == userId }
             .catch { error ->
                 logStreamError(error, OperationType.LIST, "transactions", userId)
                 throw error
@@ -694,6 +714,7 @@ class SpiderUserRepository(
                 snap.toObjects(PayoutRequest::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedByDescending { it.createdAt?.seconds ?: 0L }
             }
+            .retryTransientFirestoreErrors("SpiderUserRepo") { auth.currentUser?.uid == userId }
             .catch { error ->
                 logStreamError(error, OperationType.LIST, "payoutRequests", userId)
                 throw error
@@ -742,41 +763,73 @@ class SpiderUserRepository(
         destinationType: String,
         destinationDetails: String
     ): Result<Unit> {
-        val docRef = db.collection("payoutRequests").document()
+        val payoutRef = db.collection("payoutRequests").document()
         return try {
             val uid = requireUserId()
-            require(coinAmount >= 50.0) { "Minimum withdrawal is 50 Coins (₹50)." }
+            val cleanAmount = SpiderWalletUtil.roundCoins(coinAmount)
+            require(cleanAmount >= 50.0) { "Minimum withdrawal is 50 Coins (₹50)." }
             val cleanDetails = destinationDetails.trim().take(120)
             require(cleanDetails.length >= 3) { "Enter your valid UPI ID or payout account details." }
-            val userSnap = db.collection("users").document(uid).get().await()
-            val status = userSnap.getString("status") ?: "ACTIVE"
-            if (status != "ACTIVE") {
-                throw IllegalStateException("Your account is $status and cannot withdraw coins.")
-            }
-            val walletSnap = db.collection("wallets").document(uid).get().await()
-            val winningBal = walletSnap.getDouble("winningBalance") ?: 0.0
-            if (winningBal < coinAmount) {
-                throw IllegalStateException(
-                    "Only Winning Prize balance can be redeemed. Available Winning: ${String.format(Locale.US, "%.2f", winningBal)} Coins."
+            val cleanType = destinationType.trim().take(40).ifBlank { "UPI" }
+
+            val userRef = db.collection("users").document(uid)
+            val walletRef = db.collection("wallets").document(uid)
+            val txRef = db.collection("transactions").document("tx_out_${payoutRef.id}")
+
+            db.runTransaction { tx ->
+                // All reads MUST precede all writes in Firestore transactions
+                val userSnap = tx.get(userRef)
+                val walletSnap = tx.get(walletRef)
+
+                val status = userSnap.getString("status") ?: "ACTIVE"
+                if (status != "ACTIVE") {
+                    throw IllegalStateException("Your account is $status and cannot withdraw coins.")
+                }
+                if (!walletSnap.exists()) {
+                    throw IllegalStateException("Only Winning Prize balance can be redeemed. Available Winning: 0.00 Coins.")
+                }
+
+                val currentWallet = SpiderWalletUtil.fromDocumentOrZero(walletSnap)
+                val nextWallet = SpiderWalletUtil.computePayoutHold(currentWallet, cleanAmount)
+                val now = FieldValue.serverTimestamp()
+
+                tx.update(
+                    walletRef,
+                    with(SpiderWalletUtil) { nextWallet.toWriteMap(uid, now, includeCreatedAt = false) }
                 )
-            }
-            val now = FieldValue.serverTimestamp()
-            val payload = mapOf(
-                "userId" to uid,
-                "amount" to coinAmount,
-                "destinationType" to destinationType.trim().take(40).ifBlank { "UPI" },
-                "destinationDetails" to cleanDetails,
-                "status" to "PENDING",
-                "reviewedBy" to "",
-                "createdAt" to now,
-                "updatedAt" to now
-            )
-            docRef.set(payload).await()
+                tx.set(
+                    payoutRef,
+                    mapOf(
+                        "userId" to uid,
+                        "amount" to cleanAmount,
+                        "destinationType" to cleanType,
+                        "destinationDetails" to cleanDetails,
+                        "status" to "PENDING",
+                        "reviewedBy" to "",
+                        "createdAt" to now,
+                        "updatedAt" to now
+                    )
+                )
+                tx.set(
+                    txRef,
+                    mapOf(
+                        "userId" to uid,
+                        "type" to "PAYOUT",
+                        "direction" to "DEBIT",
+                        "description" to "Withdrawal requested via $cleanType ($cleanDetails)".take(200),
+                        "matchId" to "",
+                        "amount" to cleanAmount,
+                        "status" to "PENDING",
+                        "resultingBalance" to nextWallet.total,
+                        "createdAt" to now
+                    )
+                )
+            }.await()
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.CREATE, docRef.path)
+            handleFirestoreError(e, OperationType.CREATE, payoutRef.path)
             Result.failure(e)
         }
     }
@@ -789,6 +842,7 @@ class SpiderUserRepository(
                 snap.toObjects(NotificationItem::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedByDescending { it.createdAt?.seconds ?: 0L }
             }
+            .retryTransientFirestoreErrors("SpiderUserRepo") { auth.currentUser?.uid == userId }
             .catch { error ->
                 logStreamError(error, OperationType.LIST, "notifications", userId)
                 throw error
@@ -814,6 +868,7 @@ class SpiderUserRepository(
                 snap.toObjects(SupportTicket::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedByDescending { it.createdAt?.seconds ?: 0L }
             }
+            .retryTransientFirestoreErrors("SpiderUserRepo") { auth.currentUser?.uid == userId }
             .catch { error ->
                 logStreamError(error, OperationType.LIST, "supportTickets", userId)
                 throw error
@@ -862,6 +917,7 @@ class SpiderUserRepository(
                 snap.toObjects(Dispute::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
                     .sortedByDescending { it.createdAt?.seconds ?: 0L }
             }
+            .retryTransientFirestoreErrors("SpiderUserRepo") { auth.currentUser?.uid == userId }
             .catch { error ->
                 logStreamError(error, OperationType.LIST, "disputes", userId)
                 throw error
@@ -901,6 +957,7 @@ class SpiderUserRepository(
             .map { snap ->
                 snap.toObjects(TeamRoster::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
             }
+            .retryTransientFirestoreErrors("SpiderUserRepo") { auth.currentUser?.uid == userId }
             .catch { error ->
                 logStreamError(error, OperationType.LIST, "teams", userId)
                 throw error

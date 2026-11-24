@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -47,6 +48,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -457,6 +459,10 @@ fun AdminWalletsSection(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    LaunchedEffect(Unit) {
+        adminViewModel.refreshWallets()
+    }
+
     var targetUser by remember { mutableStateOf<UserProfile?>(null) }
     var approveReferralTarget by remember { mutableStateOf<ReferralRecord?>(null) }
 
@@ -660,7 +666,7 @@ fun AdminWalletsSection(
         } else {
             items(sortedPayouts, key = { it.id }) { payout ->
                 val userName = users.find { it.userId == payout.userId }?.username ?: payout.userId.take(10)
-                val userWin = wallets.find { it.userId == payout.userId }?.winningBalance ?: 0.0
+                val userWin = wallets.find { it.userId == payout.userId || it.id == payout.userId }?.winningBalance ?: 0.0
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = SpiderCardDark,
@@ -768,7 +774,7 @@ fun AdminWalletsSection(
             )
         }
         items(users, key = { it.id }) { user ->
-            val w = wallets.find { it.userId == user.userId }
+            val w = wallets.find { it.userId == user.userId || it.id == user.userId }
             Surface(
                 shape = RoundedCornerShape(12.dp),
                 color = SpiderCardDark,
@@ -851,6 +857,7 @@ fun AdminWalletsSection(
     }
 
     targetUser?.let { u ->
+        val currentUserWallet = wallets.find { it.userId == u.userId || it.id == u.userId }
         var amount by remember { mutableStateOf("50") }
         var direction by remember { mutableStateOf("CREDIT") }
         var bucket by remember { mutableStateOf("WINNING") }
@@ -861,6 +868,11 @@ fun AdminWalletsSection(
             title = { Text("Manage Wallet: ${u.username}", color = TextPrimary) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Current • Total: ${String.format(Locale.US, "%.0f", currentUserWallet?.totalBalance ?: 0.0)} | Dep: ${(currentUserWallet?.depositedBalance ?: 0.0).toInt()} | Win: ${(currentUserWallet?.winningBalance ?: 0.0).toInt()} | Bonus: ${(currentUserWallet?.bonusBalance ?: 0.0).toInt()}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = SpiderGold
+                    )
                     Text("Wallet Bucket", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf("WINNING", "BONUS", "DEPOSIT").forEach { b ->
@@ -919,6 +931,8 @@ fun AdminSupportAndConfigSection(
     disputes: List<Dispute>,
     adminViewModel: SpiderAdminViewModel
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val supportCfg = announcements.firstOrNull { it.category == "SUPPORT_CONFIG" }
     val rulesCfg = announcements.firstOrNull { it.category == "RULES" }
 
@@ -928,10 +942,19 @@ fun AdminSupportAndConfigSection(
         val cleaned = if (raw.contains("0000000000") || AccountValidationUtil.isPersonalWhatsAppNumberUrl(raw)) "" else raw
         mutableStateOf(cleaned)
     }
+    var whatsappBannerUrl by remember(supportCfg) { mutableStateOf(supportCfg?.whatsappBannerUrl ?: "") }
     var rulesBody by remember(rulesCfg) { mutableStateOf(rulesCfg?.body ?: "") }
     var alertTitle by remember { mutableStateOf("") }
     var alertBody by remember { mutableStateOf("") }
     var replyTicket by remember { mutableStateOf<SupportTicket?>(null) }
+
+    val waBannerPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            scope.launch {
+                ImagePickerUtil.encodeUriToDataUri(context, uri).onSuccess { whatsappBannerUrl = it }
+            }
+        }
+    }
 
     LazyColumn(
         contentPadding = PaddingValues(14.dp),
@@ -974,6 +997,53 @@ fun AdminSupportAndConfigSection(
                         colors = fc,
                         modifier = Modifier.fillMaxWidth().testTag("admin_whatsapp_channel_url_input")
                     )
+
+                    Text("WhatsApp Channel Promo Banner", style = MaterialTheme.typography.labelMedium, color = SpiderGold)
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = SpiderSurfaceElevated,
+                        border = BorderStroke(1.dp, SpiderEmerald.copy(alpha = 0.55f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(16f / 9f)
+                    ) {
+                        SpiderArtworkImage(
+                            imageUrl = whatsappBannerUrl,
+                            presetKey = "whatsapp_channel",
+                            contentDescription = "WhatsApp Channel Banner Preview",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { waBannerPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                            border = BorderStroke(1.dp, SpiderCardBorder),
+                            modifier = Modifier.weight(1f).testTag("admin_upload_whatsapp_banner_button")
+                        ) {
+                            Icon(Icons.Filled.PhotoLibrary, null, tint = TextPrimary, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Upload Banner Image", color = TextPrimary, style = MaterialTheme.typography.labelSmall)
+                        }
+                        if (whatsappBannerUrl.isNotBlank()) {
+                            OutlinedButton(
+                                onClick = { whatsappBannerUrl = "" },
+                                border = BorderStroke(1.dp, SpiderRedBright),
+                                modifier = Modifier.testTag("admin_reset_whatsapp_banner_button")
+                            ) {
+                                Text("Reset Default", color = SpiderRedBright, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = whatsappBannerUrl,
+                        onValueChange = { whatsappBannerUrl = it },
+                        label = { Text("WhatsApp Banner Image URL or Uploaded Data") },
+                        singleLine = true,
+                        colors = fc,
+                        modifier = Modifier.fillMaxWidth().testTag("admin_whatsapp_banner_url_input")
+                    )
+
                     Button(
                         onClick = {
                             adminViewModel.saveAnnouncementConfig(
@@ -982,7 +1052,8 @@ fun AdminSupportAndConfigSection(
                                 body = "Reach tournament marshals via Telegram Support or join our official WhatsApp Channel.",
                                 category = "SUPPORT_CONFIG",
                                 telegramUrl = telegramUrl.trim(),
-                                whatsappUrl = cleanChannelUrl
+                                whatsappUrl = cleanChannelUrl,
+                                whatsappBannerUrl = whatsappBannerUrl.trim()
                             )
                         },
                         enabled = !channelInvalid,
