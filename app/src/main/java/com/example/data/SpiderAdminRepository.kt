@@ -5,6 +5,7 @@ import com.example.model.Announcement
 import com.example.model.AuditLog
 import com.example.model.CustomTournamentType
 import com.example.model.Dispute
+import com.example.model.MapBanner
 import com.example.model.MatchResult
 import com.example.model.PaymentOrder
 import com.example.model.PayoutRequest
@@ -126,6 +127,14 @@ class SpiderAdminRepository(
                     .sortedBy { it.displayOrder }
             }
             .catch { logAndRethrow(it, OperationType.LIST, "banners", adminUid) }
+
+    fun observeAllMapBanners(adminUid: String): Flow<List<MapBanner>> =
+        db.collection("mapBanners").snapshots()
+            .map { snap ->
+                snap.toObjects(MapBanner::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                    .sortedWith(compareBy<MapBanner> { it.displayOrder }.thenBy { it.mapName })
+            }
+            .catch { logAndRethrow(it, OperationType.LIST, "mapBanners", adminUid) }
 
     fun observeAllAnnouncements(adminUid: String): Flow<List<Announcement>> =
         db.collection("announcements").snapshots()
@@ -296,6 +305,7 @@ class SpiderAdminRepository(
         displayName: String,
         bannerUrl: String,
         shortDescription: String,
+        matchDetails: String,
         gameMode: String,
         mapName: String,
         entryFee: Double,
@@ -318,12 +328,14 @@ class SpiderAdminRepository(
         val tourId = "tour_$typeId"
         val now = FieldValue.serverTimestamp()
         val batch = db.batch()
+        val cleanDetails = matchDetails.trim().take(4000)
 
         val typeRef = db.collection("customTournamentTypes").document(typeId)
         val typePayload = mutableMapOf<String, Any>(
             "displayName" to displayName.trim().take(60),
             "bannerUrl" to bannerUrl.take(200000),
             "shortDescription" to shortDescription.trim().take(300),
+            "matchDetails" to cleanDetails,
             "gameMode" to gameMode.trim().take(40),
             "mapName" to mapName.trim().take(40),
             "entryFee" to entryFee.coerceAtLeast(0.0),
@@ -385,6 +397,7 @@ class SpiderAdminRepository(
             "categoryId" to categoryId,
             "title" to displayName.trim().take(80),
             "shortDescription" to shortDescription.trim().take(300),
+            "matchDetails" to cleanDetails,
             "gameMode" to gameMode.trim().take(40),
             "mapName" to mapName.trim().take(40),
             "entryFee" to entryFee.coerceAtLeast(0.0),
@@ -470,11 +483,54 @@ class SpiderAdminRepository(
         batch.commit().await()
     }
 
+    suspend fun saveMapBanner(
+        existingId: String?,
+        mapName: String,
+        bannerUrl: String,
+        presetKey: String,
+        displayOrder: Long,
+        enabled: Boolean
+    ): Result<Unit> = runAdminMutation("mapBanners") { uid, email ->
+        val cleanName = mapName.trim().take(40)
+        require(cleanName.length >= 2) { "Map name must be at least 2 characters." }
+        val slug = cleanName.lowercase(Locale.US).replace(Regex("[^a-z0-9]+"), "_").trim('_').ifBlank { "custom" }
+        val docId = existingId?.takeIf { it.isNotBlank() } ?: "map_${slug.take(40)}"
+        val ref = db.collection("mapBanners").document(docId)
+        val existingSnap = ref.get().await()
+        val now = FieldValue.serverTimestamp()
+        val batch = db.batch()
+        val safePreset = presetKey.trim().take(64).ifBlank { "battle_royale" }
+        val data = mutableMapOf<String, Any>(
+            "mapName" to cleanName,
+            "bannerUrl" to bannerUrl.take(200000),
+            "presetKey" to safePreset,
+            "displayOrder" to displayOrder.coerceIn(0L, 10000L),
+            "enabled" to enabled,
+            "updatedAt" to now
+        )
+        if (!existingSnap.exists()) {
+            data["createdAt"] = now
+            batch.set(ref, data)
+        } else {
+            batch.update(ref, data)
+        }
+        appendAudit(batch, uid, email, "SAVE_MAP_BANNER", "mapBanners", docId, "Saved map banner for $cleanName")
+        batch.commit().await()
+    }
+
+    suspend fun deleteMapBanner(mapId: String): Result<Unit> = runAdminMutation("mapBanners/$mapId") { uid, email ->
+        val batch = db.batch()
+        batch.delete(db.collection("mapBanners").document(mapId))
+        appendAudit(batch, uid, email, "DELETE_MAP_BANNER", "mapBanners", mapId, "Deleted map banner $mapId")
+        batch.commit().await()
+    }
+
     suspend fun saveTournament(
         existingId: String?,
         categoryId: String,
         title: String,
         shortDescription: String,
+        matchDetails: String,
         gameMode: String,
         mapName: String,
         entryFee: Double,
@@ -498,6 +554,7 @@ class SpiderAdminRepository(
         val safeMode = gameMode.trim().take(40).ifBlank { "BATTLE ROYALE" }
         val safeMap = mapName.trim().take(40).ifBlank { "Bermuda" }
         val safeDesc = shortDescription.trim().take(300).ifBlank { "$safeMode tournament on $safeMap" }
+        val safeDetails = matchDetails.trim().take(4000)
         val safeDeadline = registrationDeadline.trim().take(60).ifBlank { "$matchDate $matchTime".trim() }
         val safeRules = rules.trim().take(4000).ifBlank { "Fair-play rules enforced. Zero hacks or teaming." }
         val safeVisibility = if (visibility in listOf("PUBLIC", "HIDDEN")) visibility else "PUBLIC"
@@ -506,6 +563,7 @@ class SpiderAdminRepository(
             "categoryId" to categoryId,
             "title" to title.trim().take(80),
             "shortDescription" to safeDesc,
+            "matchDetails" to safeDetails,
             "gameMode" to safeMode,
             "mapName" to safeMap,
             "entryFee" to entryFee.coerceAtLeast(0.0),

@@ -26,6 +26,7 @@ import com.example.model.SupportTicket
 import com.example.model.TeamRoster
 import com.example.model.Tournament
 import com.example.model.TournamentCategory
+import com.example.model.TournamentParticipant
 import com.example.model.UiState
 import com.example.model.UserProfile
 import com.example.model.Wallet
@@ -298,6 +299,13 @@ class SpiderMainViewModel(
             }
         }
     }
+
+    fun observeTournamentParticipants(tournamentId: String): Flow<List<TournamentParticipant>> =
+        catalogRepo.observeTournamentParticipants(tournamentId, currentUserId)
+            .catch { error ->
+                val fe = extractFirestoreErrorOrRethrow(error)
+                Log.w(TAG, "Participants stream error for $tournamentId", fe)
+            }
 
     fun loadRoomCredential(tournamentId: String) {
         viewModelScope.launch {

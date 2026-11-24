@@ -21,6 +21,7 @@ object AppRoutes {
     const val WALLET = "wallet"
     const val ACCOUNT = "account"
     const val TOURNAMENTS_BY_CATEGORY = "tournaments/{categoryId}"
+    const val MATCH_DETAILS = "match_details/{tournamentId}"
     const val MY_MATCHES = "my_matches/{initialTab}"
     const val RULES = "rules"
     const val SUPPORT = "support"
@@ -29,6 +30,7 @@ object AppRoutes {
     const val ADMIN_DASHBOARD = "admin_dashboard"
 
     fun tournamentsByCategory(categoryId: String) = "tournaments/$categoryId"
+    fun matchDetails(tournamentId: String) = "match_details/$tournamentId"
     fun myMatches(initialTab: String = "UPCOMING") = "my_matches/$initialTab"
 }
 

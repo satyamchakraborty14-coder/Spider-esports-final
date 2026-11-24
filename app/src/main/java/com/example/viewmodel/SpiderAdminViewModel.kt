@@ -11,6 +11,7 @@ import com.example.model.Announcement
 import com.example.model.AuditLog
 import com.example.model.CustomTournamentType
 import com.example.model.Dispute
+import com.example.model.MapBanner
 import com.example.model.MatchResult
 import com.example.model.PaymentOrder
 import com.example.model.PayoutRequest
@@ -52,6 +53,7 @@ class SpiderAdminViewModel(
     val customTypes: StateFlow<List<CustomTournamentType>> = adminRepo.observeAllCustomTypes(adminUid).safeList("customTypes")
     val tournaments: StateFlow<List<Tournament>> = adminRepo.observeAllTournaments(adminUid).safeList("tournaments")
     val banners: StateFlow<List<PromoBanner>> = adminRepo.observeAllBanners(adminUid).safeList("banners")
+    val mapBanners: StateFlow<List<MapBanner>> = adminRepo.observeAllMapBanners(adminUid).safeList("mapBanners")
     val announcements: StateFlow<List<Announcement>> = adminRepo.observeAllAnnouncements(adminUid).safeList("announcements")
     val registrations: StateFlow<List<Registration>> = adminRepo.observeAllRegistrations(adminUid).safeList("registrations")
     val wallets: StateFlow<List<Wallet>> = adminRepo.observeAllWallets(adminUid).safeList("wallets")
@@ -117,6 +119,7 @@ class SpiderAdminViewModel(
         displayName: String,
         bannerUrl: String,
         shortDescription: String,
+        matchDetails: String,
         gameMode: String,
         mapName: String,
         entryFee: Double,
@@ -135,7 +138,7 @@ class SpiderAdminViewModel(
     ) {
         viewModelScope.launch {
             adminRepo.saveRandomTournament(
-                existingTypeId, existingCategoryId, displayName, bannerUrl, shortDescription,
+                existingTypeId, existingCategoryId, displayName, bannerUrl, shortDescription, matchDetails,
                 gameMode, mapName, entryFee, prizePool, perKillReward, maxParticipants,
                 matchDate, matchTime, registrationDeadline, rules, visibility, status,
                 displayOrder, enabled, archived
@@ -180,11 +183,35 @@ class SpiderAdminViewModel(
         }
     }
 
+    fun saveMapBanner(
+        existingId: String?,
+        mapName: String,
+        bannerUrl: String,
+        presetKey: String = "battle_royale",
+        displayOrder: Long = 1L,
+        enabled: Boolean = true
+    ) {
+        viewModelScope.launch {
+            adminRepo.saveMapBanner(existingId, mapName, bannerUrl, presetKey, displayOrder, enabled)
+                .onSuccess { _statusMessage.value = true to "Saved banner for map '$mapName'." }
+                .onFailure { _statusMessage.value = false to (it.localizedMessage ?: "Map banner save failed") }
+        }
+    }
+
+    fun deleteMapBanner(mapId: String) {
+        viewModelScope.launch {
+            adminRepo.deleteMapBanner(mapId)
+                .onSuccess { _statusMessage.value = true to "Map banner deleted." }
+                .onFailure { _statusMessage.value = false to (it.localizedMessage ?: "Map banner delete failed") }
+        }
+    }
+
     fun saveTournament(
         existingId: String?,
         categoryId: String,
         title: String,
         shortDescription: String,
+        matchDetails: String,
         gameMode: String,
         mapName: String,
         entryFee: Double,
@@ -203,7 +230,7 @@ class SpiderAdminViewModel(
     ) {
         viewModelScope.launch {
             adminRepo.saveTournament(
-                existingId, categoryId, title, shortDescription, gameMode, mapName,
+                existingId, categoryId, title, shortDescription, matchDetails, gameMode, mapName,
                 entryFee, prizePool, perKillReward, maxParticipants,
                 matchDate, matchTime, registrationDeadline, rules,
                 bannerUrl, presetKey, visibility, status, soloFormat

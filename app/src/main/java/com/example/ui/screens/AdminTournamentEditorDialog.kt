@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -35,6 +36,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,11 +51,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.data.ImagePickerUtil
+import com.example.model.MapBanner
 import com.example.model.Tournament
 import com.example.model.TournamentCategory
 import com.example.ui.components.SpiderArtworkImage
 import com.example.ui.theme.SpiderCardBorder
 import com.example.ui.theme.SpiderCardDark
+import com.example.ui.theme.SpiderEmerald
 import com.example.ui.theme.SpiderGold
 import com.example.ui.theme.SpiderRed
 import com.example.ui.theme.SpiderRedBright
@@ -62,15 +66,34 @@ import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
 
+internal val DEFAULT_MAP_SUGGESTIONS = listOf(
+    "Bermuda",
+    "Purgatory",
+    "Kalahari",
+    "Alpine",
+    "Nexterra",
+    "Iron Cage",
+    "Solara"
+)
+
+internal fun findSavedMapBanner(mapName: String, mapBanners: List<MapBanner>): MapBanner? {
+    val clean = mapName.trim()
+    if (clean.isEmpty()) return null
+    return mapBanners.firstOrNull { it.enabled && it.mapName.trim().equals(clean, ignoreCase = true) }
+}
+
 @Composable
 fun TournamentEditorDialog(
     initial: Tournament?,
     categories: List<TournamentCategory>,
+    mapBanners: List<MapBanner> = emptyList(),
+    onSaveMapBanner: (mapName: String, bannerUrl: String, presetKey: String) -> Unit = { _, _, _ -> },
     onDismiss: () -> Unit,
     onSave: (
         categoryId: String,
         title: String,
         shortDescription: String,
+        matchDetails: String,
         gameMode: String,
         mapName: String,
         entryFee: Double,
@@ -102,6 +125,7 @@ fun TournamentEditorDialog(
     var title by remember(initial) { mutableStateOf(initial?.title ?: "") }
     var selectedCat by remember(initial, categories) { mutableStateOf(initialCat) }
     var shortDesc by remember(initial) { mutableStateOf(initial?.shortDescription ?: "") }
+    var matchDetails by remember(initial) { mutableStateOf(initial?.matchDetails ?: "") }
     var gameMode by remember(initial) {
         mutableStateOf(initial?.gameMode ?: initialCat?.categoryName ?: "FULL MAP")
     }
@@ -134,7 +158,20 @@ fun TournamentEditorDialog(
     var rules by remember(initial) {
         mutableStateOf(initial?.rules ?: "Fair-play rules enforced. Zero hacks or teaming.")
     }
-    var bannerUrl by remember(initial) { mutableStateOf(initial?.bannerUrl ?: "") }
+    var bannerUrl by remember(initial) {
+        mutableStateOf(
+            initial?.bannerUrl?.takeIf { it.isNotBlank() }
+                ?: findSavedMapBanner(initial?.mapName ?: "Bermuda", mapBanners)?.bannerUrl
+                ?: ""
+        )
+    }
+    var lastAutoBannerUrl by remember(initial) {
+        mutableStateOf(
+            if (initial?.bannerUrl.isNullOrBlank()) {
+                findSavedMapBanner(initial?.mapName ?: "Bermuda", mapBanners)?.bannerUrl ?: ""
+            } else ""
+        )
+    }
     var presetKey by remember(initial) {
         mutableStateOf(initial?.presetKey ?: initialCat?.presetKey ?: "battle_royale")
     }
@@ -144,11 +181,48 @@ fun TournamentEditorDialog(
         mutableStateOf(initial?.soloFormat ?: (initialCat?.categoryType == "SOLO"))
     }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) {
-            scope.launch { ImagePickerUtil.encodeUriToDataUri(context, uri).onSuccess { bannerUrl = it } }
+    // Auto-load saved map banner when mapBanners arrive on create (or when banner is still empty)
+    LaunchedEffect(mapBanners, mapName) {
+        val saved = findSavedMapBanner(mapName, mapBanners)
+        if (saved != null && saved.bannerUrl.isNotBlank() && (bannerUrl.isBlank() || bannerUrl == lastAutoBannerUrl)) {
+            bannerUrl = saved.bannerUrl
+            presetKey = saved.presetKey
+            lastAutoBannerUrl = saved.bannerUrl
         }
     }
+
+    fun applyMapSelection(newMap: String, forceApplySaved: Boolean) {
+        mapName = newMap
+        val saved = findSavedMapBanner(newMap, mapBanners)
+        if (saved != null && saved.bannerUrl.isNotBlank()) {
+            if (forceApplySaved || bannerUrl.isBlank() || bannerUrl == lastAutoBannerUrl) {
+                bannerUrl = saved.bannerUrl
+                presetKey = saved.presetKey
+                lastAutoBannerUrl = saved.bannerUrl
+            }
+        } else if (forceApplySaved && bannerUrl == lastAutoBannerUrl) {
+            bannerUrl = ""
+            lastAutoBannerUrl = ""
+        }
+    }
+
+    val mapChoices = remember(mapBanners) {
+        (mapBanners.filter { it.enabled }.map { it.mapName } + DEFAULT_MAP_SUGGESTIONS)
+            .distinctBy { it.trim().lowercase() }
+    }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            scope.launch {
+                ImagePickerUtil.encodeUriToDataUri(context, uri).onSuccess {
+                    bannerUrl = it
+                    lastAutoBannerUrl = ""
+                }
+            }
+        }
+    }
+
+    val matchedSavedBanner = remember(mapName, mapBanners) { findSavedMapBanner(mapName, mapBanners) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -167,7 +241,7 @@ fun TournamentEditorDialog(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(92.dp)
+                        .height(96.dp)
                         .clip(RoundedCornerShape(10.dp))
                 ) {
                     SpiderArtworkImage(
@@ -175,6 +249,13 @@ fun TournamentEditorDialog(
                         presetKey = presetKey,
                         contentDescription = "Tournament banner preview",
                         modifier = Modifier.fillMaxSize()
+                    )
+                }
+                if (matchedSavedBanner != null && matchedSavedBanner.bannerUrl.isNotBlank()) {
+                    Text(
+                        text = "Saved map banner loaded for ${matchedSavedBanner.mapName}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = SpiderEmerald
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -189,11 +270,34 @@ fun TournamentEditorDialog(
                     }
                     if (bannerUrl.isNotBlank()) {
                         OutlinedButton(
-                            onClick = { bannerUrl = "" },
+                            onClick = {
+                                bannerUrl = ""
+                                lastAutoBannerUrl = ""
+                            },
                             border = BorderStroke(1.dp, SpiderRed.copy(alpha = 0.5f))
                         ) {
                             Text("Clear", color = SpiderRedBright, style = MaterialTheme.typography.labelSmall)
                         }
+                    }
+                }
+                if (bannerUrl.isNotBlank() && mapName.trim().length >= 2) {
+                    val alreadySaved = matchedSavedBanner?.bannerUrl == bannerUrl
+                    OutlinedButton(
+                        onClick = {
+                            onSaveMapBanner(mapName.trim(), bannerUrl, presetKey)
+                            lastAutoBannerUrl = bannerUrl
+                        },
+                        enabled = !alreadySaved,
+                        border = BorderStroke(1.dp, SpiderGold.copy(alpha = 0.6f)),
+                        modifier = Modifier.fillMaxWidth().testTag("save_map_banner_inline")
+                    ) {
+                        Icon(Icons.Filled.BookmarkAdd, null, tint = SpiderGold, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = if (alreadySaved) "Banner Saved for $mapName" else "Save Banner for Map '$mapName'",
+                            color = SpiderGold,
+                            style = MaterialTheme.typography.labelSmall
+                        )
                     }
                 }
 
@@ -243,10 +347,47 @@ fun TournamentEditorDialog(
                 OutlinedTextField(
                     value = shortDesc,
                     onValueChange = { shortDesc = it },
-                    label = { Text("Short Description") },
+                    label = { Text("Short Summary (Card Subtitle)") },
+                    singleLine = true,
                     colors = fc,
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                OutlinedTextField(
+                    value = matchDetails,
+                    onValueChange = { matchDetails = it },
+                    label = { Text("Match Details (Shows in Details -> Description)") },
+                    minLines = 3,
+                    maxLines = 6,
+                    colors = fc,
+                    modifier = Modifier.fillMaxWidth().testTag("tournament_match_details_input")
+                )
+
+                Text("Select Map (Auto-fills saved map banner)", style = MaterialTheme.typography.labelSmall, color = SpiderGold)
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    mapChoices.forEach { m ->
+                        val hasSaved = findSavedMapBanner(m, mapBanners)?.bannerUrl?.isNotBlank() == true
+                        FilterChip(
+                            selected = mapName.trim().equals(m, ignoreCase = true),
+                            onClick = { applyMapSelection(m, forceApplySaved = true) },
+                            label = {
+                                Text(
+                                    if (hasSaved) "$m ★" else m,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = SpiderRed,
+                                selectedLabelColor = Color.White,
+                                containerColor = SpiderSurfaceElevated,
+                                labelColor = TextSecondary
+                            )
+                        )
+                    }
+                }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
@@ -259,7 +400,7 @@ fun TournamentEditorDialog(
                     )
                     OutlinedTextField(
                         value = mapName,
-                        onValueChange = { mapName = it },
+                        onValueChange = { applyMapSelection(it, forceApplySaved = false) },
                         label = { Text("Map") },
                         singleLine = true,
                         colors = fc,
@@ -338,7 +479,10 @@ fun TournamentEditorDialog(
                 )
                 OutlinedTextField(
                     value = bannerUrl,
-                    onValueChange = { bannerUrl = it },
+                    onValueChange = {
+                        bannerUrl = it
+                        lastAutoBannerUrl = ""
+                    },
                     label = { Text("Banner Image URL (optional)") },
                     singleLine = true,
                     colors = fc,
@@ -408,6 +552,7 @@ fun TournamentEditorDialog(
                         cat.id,
                         title,
                         shortDesc,
+                        matchDetails,
                         gameMode.ifBlank { cat.categoryName },
                         mapName,
                         entryFee.toDoubleOrNull() ?: 0.0,

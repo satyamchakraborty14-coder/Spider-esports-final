@@ -58,6 +58,7 @@ import java.util.Locale
 private enum class AdminTab(val label: String) {
     OVERVIEW("Overview"),
     CATEGORIES("Categories"),
+    MAP_BANNERS("Map Banners"),
     RANDOM("Random Tourneys"),
     BANNERS("Banners"),
     TOURNAMENTS("Tournaments"),
@@ -79,6 +80,7 @@ fun AdminDashboardScreen(
     val customTypes by adminViewModel.customTypes.collectAsStateWithLifecycle()
     val tournaments by adminViewModel.tournaments.collectAsStateWithLifecycle()
     val banners by adminViewModel.banners.collectAsStateWithLifecycle()
+    val mapBanners by adminViewModel.mapBanners.collectAsStateWithLifecycle()
     val announcements by adminViewModel.announcements.collectAsStateWithLifecycle()
     val registrations by adminViewModel.registrations.collectAsStateWithLifecycle()
     val wallets by adminViewModel.wallets.collectAsStateWithLifecycle()
@@ -239,9 +241,10 @@ fun AdminDashboardScreen(
                 }
             }
             AdminTab.CATEGORIES -> AdminCategoriesSection(categories, adminViewModel)
-            AdminTab.RANDOM -> AdminRandomTournamentsSection(customTypes, adminViewModel)
+            AdminTab.MAP_BANNERS -> AdminMapBannersSection(mapBanners, adminViewModel)
+            AdminTab.RANDOM -> AdminRandomTournamentsSection(customTypes, mapBanners, adminViewModel)
             AdminTab.BANNERS -> AdminBannersSection(banners, adminViewModel)
-            AdminTab.TOURNAMENTS -> AdminTournamentsSection(tournaments, categories, users, registrations, results, adminViewModel)
+            AdminTab.TOURNAMENTS -> AdminTournamentsSection(tournaments, categories, mapBanners, users, registrations, results, adminViewModel)
             AdminTab.USERS -> AdminUsersSection(users, adminUsers, adminViewModel)
             AdminTab.WALLETS -> AdminWalletsSection(users, wallets, walletConfig, payments, payouts, transactions, referrals, adminViewModel)
             AdminTab.SUPPORT -> AdminSupportAndConfigSection(announcements, tickets, disputes, adminViewModel)

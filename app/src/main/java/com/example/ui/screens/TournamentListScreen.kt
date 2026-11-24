@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Gavel
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.AlertDialog
@@ -93,6 +94,7 @@ fun TournamentListScreen(
     profile: UserProfile?,
     wallet: Wallet,
     onBack: () -> Unit,
+    onDetailsClick: (Tournament) -> Unit = {},
     onJoinTournament: (Tournament, String, String, (Boolean) -> Unit) -> Unit
 ) {
     var selectedFilter by remember { mutableStateOf(TournamentFilter.ALL) }
@@ -220,6 +222,7 @@ fun TournamentListScreen(
                                 tournament = tour,
                                 isRegistered = tour.id in registeredIds,
                                 resultCount = tourResultCount,
+                                onDetailsClick = { onDetailsClick(tour) },
                                 onJoinClick = { activeJoinTournament = tour },
                                 onViewResults = { activeResultsTournament = tour }
                             )
@@ -261,6 +264,7 @@ private fun TournamentDetailCard(
     tournament: Tournament,
     isRegistered: Boolean,
     resultCount: Int = 0,
+    onDetailsClick: () -> Unit,
     onJoinClick: () -> Unit,
     onViewResults: () -> Unit
 ) {
@@ -364,52 +368,78 @@ private fun TournamentDetailCard(
                     }
                 }
 
-                if (isCompleted) {
-                    Button(
-                        onClick = onViewResults,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = SpiderGold,
-                            contentColor = SpiderBlack
-                        ),
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(
+                        onClick = onDetailsClick,
+                        border = BorderStroke(1.dp, SpiderCardBorder),
                         shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp),
                         modifier = Modifier
-                            .fillMaxWidth()
+                            .weight(0.9f)
                             .height(48.dp)
-                            .testTag("view_results_tournament_${tournament.id}")
+                            .testTag("details_tournament_${tournament.id}")
                     ) {
-                        Icon(Icons.Filled.EmojiEvents, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.Filled.Info, null, tint = TextPrimary, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(5.dp))
                         Text(
-                            text = if (resultCount > 0) {
-                                "VIEW RESULTS & RANKS ($resultCount/48)"
-                            } else {
-                                "VIEW RESULTS & RANKS (1–48)"
-                            },
+                            text = "DETAILS",
                             style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold
+                            color = TextPrimary,
+                            maxLines = 1
                         )
                     }
-                } else {
-                    Button(
-                        onClick = onJoinClick,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isRegistered) SpiderEmerald else SpiderRed,
-                            contentColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("join_tournament_${tournament.id}")
-                    ) {
-                        Text(
-                            text = when {
-                                isRegistered -> "ALREADY REGISTERED • VIEW DETAILS"
-                                slotsLeft == 0L -> "TOURNAMENT FULL"
-                                else -> "JOIN TOURNAMENT"
-                            },
-                            style = MaterialTheme.typography.labelLarge
-                        )
+
+                    if (isCompleted) {
+                        Button(
+                            onClick = onViewResults,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = SpiderGold,
+                                contentColor = SpiderBlack
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp),
+                            modifier = Modifier
+                                .weight(1.35f)
+                                .height(48.dp)
+                                .testTag("view_results_tournament_${tournament.id}")
+                        ) {
+                            Icon(Icons.Filled.EmojiEvents, null, modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(5.dp))
+                            Text(
+                                text = if (resultCount > 0) "RESULTS ($resultCount/48)" else "RESULTS (1–48)",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                        }
+                    } else {
+                        Button(
+                            onClick = onJoinClick,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isRegistered) SpiderEmerald else SpiderRed,
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp),
+                            modifier = Modifier
+                                .weight(1.35f)
+                                .height(48.dp)
+                                .testTag("join_tournament_${tournament.id}")
+                        ) {
+                            Text(
+                                text = when {
+                                    isRegistered -> "JOINED"
+                                    slotsLeft == 0L -> "FULL"
+                                    else -> "JOIN TOURNAMENT"
+                                },
+                                style = MaterialTheme.typography.labelLarge,
+                                maxLines = 1
+                            )
+                        }
                     }
                 }
             }

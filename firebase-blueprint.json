@@ -107,6 +107,7 @@
         "displayName": { "type": "string" },
         "bannerUrl": { "type": "string" },
         "shortDescription": { "type": "string" },
+        "matchDetails": { "type": "string" },
         "gameMode": { "type": "string" },
         "mapName": { "type": "string" },
         "entryFee": { "type": "number" },
@@ -136,6 +137,7 @@
         "categoryId": { "type": "string" },
         "title": { "type": "string" },
         "shortDescription": { "type": "string" },
+        "matchDetails": { "type": "string" },
         "gameMode": { "type": "string" },
         "mapName": { "type": "string" },
         "entryFee": { "type": "number" },
@@ -474,6 +476,34 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["actorId", "actorEmail", "action", "targetCollection", "targetId", "summary", "createdAt"]
+    },
+    "TournamentParticipant": {
+      "title": "TournamentParticipant",
+      "description": "Privacy-safe public participant roster entry for a tournament's Joined Members tab.",
+      "type": "object",
+      "properties": {
+        "tournamentId": { "type": "string" },
+        "userId": { "type": "string" },
+        "playerName": { "type": "string" },
+        "username": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["tournamentId", "userId", "playerName", "username", "createdAt"]
+    },
+    "MapBanner": {
+      "title": "MapBanner",
+      "description": "Admin-saved default banner artwork mapped by battleground map name.",
+      "type": "object",
+      "properties": {
+        "mapName": { "type": "string" },
+        "bannerUrl": { "type": "string" },
+        "presetKey": { "type": "string" },
+        "displayOrder": { "type": "integer" },
+        "enabled": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["mapName", "bannerUrl", "displayOrder", "enabled", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -488,6 +518,7 @@
     "/customTournamentTypes/{typeId}": { "schema": { "$ref": "#/entities/CustomTournamentType" }, "description": "Random Tournament custom types" },
     "/tournaments/{tournamentId}": { "schema": { "$ref": "#/entities/Tournament" }, "description": "Tournaments" },
     "/tournaments/{tournamentId}/credentials/{credId}": { "schema": { "$ref": "#/entities/RoomCredential" }, "description": "Room ID and password protected for registered players" },
+    "/tournaments/{tournamentId}/participants/{participantUid}": { "schema": { "$ref": "#/entities/TournamentParticipant" }, "description": "Public joined member names for a tournament" },
     "/registrations/{registrationId}": { "schema": { "$ref": "#/entities/Registration" }, "description": "Tournament registrations" },
     "/teams/{teamId}": { "schema": { "$ref": "#/entities/Team" }, "description": "Player teams" },
     "/matches/{matchId}": { "schema": { "$ref": "#/entities/MatchRecord" }, "description": "Player match schedule and status" },
@@ -501,6 +532,7 @@
     "/supportTickets/{ticketId}": { "schema": { "$ref": "#/entities/SupportTicket" }, "description": "Support tickets" },
     "/disputes/{disputeId}": { "schema": { "$ref": "#/entities/Dispute" }, "description": "Match result disputes" },
     "/banners/{bannerId}": { "schema": { "$ref": "#/entities/PromoBanner" }, "description": "Promotional banners" },
+    "/mapBanners/{mapId}": { "schema": { "$ref": "#/entities/MapBanner" }, "description": "Saved map banners auto-applied when selecting a map" },
     "/announcements/{announcementId}": { "schema": { "$ref": "#/entities/Announcement" }, "description": "Announcements, rules, and support links" },
     "/leaderboards/{entryId}": { "schema": { "$ref": "#/entities/LeaderboardEntry" }, "description": "Verified leaderboard rankings" },
     "/adminUsers/{adminUid}": { "schema": { "$ref": "#/entities/AdminUser" }, "description": "Admin role registry" },

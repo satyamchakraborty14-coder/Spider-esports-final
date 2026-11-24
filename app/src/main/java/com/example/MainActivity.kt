@@ -81,6 +81,7 @@ import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.CompleteProfileGateScreen
 import com.example.ui.screens.EarnScreen
 import com.example.ui.screens.EmailVerificationGateScreen
+import com.example.ui.screens.MatchDetailsScreen
 import com.example.ui.screens.MyMatchesScreen
 import com.example.ui.screens.NotificationsScreen
 import com.example.ui.screens.PlayHomeScreen
@@ -450,6 +451,9 @@ private fun SpiderAppShell(currentUserId: String) {
                                 onCategoryClick = { cat ->
                                     navController.navigate(AppRoutes.tournamentsByCategory(cat.id))
                                 },
+                                onDetailsClick = { tour ->
+                                    navController.navigate(AppRoutes.matchDetails(tour.id))
+                                },
                                 onJoinSoloTournament = mainViewModel::registerForTournament
                             )
                         }
@@ -523,6 +527,35 @@ private fun SpiderAppShell(currentUserId: String) {
                                 currentUserId = currentUserId,
                                 profile = profile,
                                 wallet = wallet,
+                                onBack = { navController.popBackStack() },
+                                onDetailsClick = { tour ->
+                                    navController.navigate(AppRoutes.matchDetails(tour.id))
+                                },
+                                onJoinTournament = mainViewModel::registerForTournament
+                            )
+                        }
+
+                        composable(
+                            route = AppRoutes.MATCH_DETAILS,
+                            arguments = listOf(navArgument("tournamentId") { type = NavType.StringType })
+                        ) { entry ->
+                            val tournamentId = entry.arguments?.getString("tournamentId") ?: ""
+                            val tour = (tournamentsState as? UiState.Success)?.data?.firstOrNull { it.id == tournamentId }
+                            val participantsFlow = remember(tournamentId) {
+                                mainViewModel.observeTournamentParticipants(tournamentId)
+                            }
+                            val participants by participantsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+                            val currentReg = remember(registrations, tournamentId) {
+                                registrations.firstOrNull { it.tournamentId == tournamentId }
+                            }
+                            MatchDetailsScreen(
+                                tournament = tour,
+                                participants = participants,
+                                currentUserRegistration = currentReg,
+                                currentUserId = currentUserId,
+                                profile = profile,
+                                wallet = wallet,
+                                results = results,
                                 onBack = { navController.popBackStack() },
                                 onJoinTournament = mainViewModel::registerForTournament
                             )

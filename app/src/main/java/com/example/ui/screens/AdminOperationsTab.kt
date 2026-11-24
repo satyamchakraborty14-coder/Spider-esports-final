@@ -67,6 +67,7 @@ import com.example.data.ImagePickerUtil
 import com.example.model.AdminUserRecord
 import com.example.model.Announcement
 import com.example.model.Dispute
+import com.example.model.MapBanner
 import com.example.model.MatchResult
 import com.example.model.PaymentOrder
 import com.example.model.PayoutRequest
@@ -102,6 +103,7 @@ import java.util.Locale
 fun AdminTournamentsSection(
     tournaments: List<Tournament>,
     categories: List<TournamentCategory>,
+    mapBanners: List<MapBanner>,
     users: List<UserProfile>,
     registrations: List<Registration>,
     results: List<MatchResult>,
@@ -201,16 +203,21 @@ fun AdminTournamentsSection(
         TournamentEditorDialog(
             initial = editingTournament,
             categories = categories,
+            mapBanners = mapBanners,
+            onSaveMapBanner = { mName, bUrl, pKey ->
+                adminViewModel.saveMapBanner(null, mName, bUrl, pKey)
+            },
             onDismiss = {
                 showCreate = false
                 editingTournament = null
             },
-            onSave = { categoryId, title, shortDesc, gameMode, mapName, entryFee, prizePool, perKillReward, maxP, matchDate, matchTime, deadline, rules, bannerUrl, presetKey, visibility, status, solo ->
+            onSave = { categoryId, title, shortDesc, matchDetails, gameMode, mapName, entryFee, prizePool, perKillReward, maxP, matchDate, matchTime, deadline, rules, bannerUrl, presetKey, visibility, status, solo ->
                 adminViewModel.saveTournament(
                     existingId = editingTournament?.id,
                     categoryId = categoryId,
                     title = title,
                     shortDescription = shortDesc,
+                    matchDetails = matchDetails,
                     gameMode = gameMode,
                     mapName = mapName,
                     entryFee = entryFee,

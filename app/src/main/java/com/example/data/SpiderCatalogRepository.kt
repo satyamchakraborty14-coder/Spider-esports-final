@@ -9,6 +9,7 @@ import com.example.model.Registration
 import com.example.model.RoomCredential
 import com.example.model.Tournament
 import com.example.model.TournamentCategory
+import com.example.model.TournamentParticipant
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
@@ -111,6 +112,16 @@ class SpiderCatalogRepository(
             }
             .catch { logAndRethrow(it, OperationType.LIST, "leaderboards", userId) }
 
+    fun observeTournamentParticipants(tournamentId: String, userId: String): Flow<List<TournamentParticipant>> =
+        db.collection("tournaments").document(tournamentId)
+            .collection("participants")
+            .snapshots()
+            .map { snap ->
+                snap.toObjects(TournamentParticipant::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                    .sortedBy { it.createdAt?.seconds ?: Long.MAX_VALUE }
+            }
+            .catch { logAndRethrow(it, OperationType.LIST, "tournaments/$tournamentId/participants", userId) }
+
     suspend fun fetchRoomCredential(tournamentId: String): Result<RoomCredential?> {
         val path = "tournaments/$tournamentId/credentials/room"
         return try {
@@ -158,6 +169,7 @@ class SpiderCatalogRepository(
 
             val regRef = db.collection("registrations").document(regId)
             val tourRef = db.collection("tournaments").document(tournament.id)
+            val participantRef = tourRef.collection("participants").document(uid)
             val walletRef = db.collection("wallets").document(uid)
             val txRef = db.collection("transactions").document("tx_join_${tournament.id}_$uid")
 
@@ -252,6 +264,8 @@ class SpiderCatalogRepository(
                     )
                 }
 
+                val cleanUsername = username.trim().take(32).let { if (it.length < 2) "Player" else it }
+                val cleanPlayerName = inGameName.trim().take(40)
                 tx.set(
                     regRef,
                     mapOf(
@@ -259,13 +273,23 @@ class SpiderCatalogRepository(
                         "tournamentTitle" to liveTitle,
                         "categoryId" to tournament.categoryId,
                         "userId" to uid,
-                        "username" to username.trim().take(32).let { if (it.length < 2) "Player" else it },
-                        "inGameName" to inGameName.trim().take(40),
+                        "username" to cleanUsername,
+                        "inGameName" to cleanPlayerName,
                         "inGameUid" to inGameUid.trim().take(40),
                         "entryFeePaid" to liveFee,
                         "status" to "CONFIRMED",
                         "createdAt" to now,
                         "updatedAt" to now
+                    )
+                )
+                tx.set(
+                    participantRef,
+                    mapOf(
+                        "tournamentId" to tournament.id,
+                        "userId" to uid,
+                        "playerName" to cleanPlayerName,
+                        "username" to cleanUsername,
+                        "createdAt" to now
                     )
                 )
                 tx.update(

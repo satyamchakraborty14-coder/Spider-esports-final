@@ -125,6 +125,7 @@ service cloud.firestore {
       return data.displayName is string && data.displayName.size() >= 2 && data.displayName.size() <= 60 &&
              data.bannerUrl is string && data.bannerUrl.size() <= 200000 &&
              data.shortDescription is string && data.shortDescription.size() <= 300 &&
+             isOptString(data, 'matchDetails', 4000) &&
              data.gameMode is string && data.gameMode.size() >= 2 && data.gameMode.size() <= 40 &&
              data.mapName is string && data.mapName.size() >= 2 && data.mapName.size() <= 40 &&
              data.entryFee is number && data.entryFee >= 0 &&
@@ -149,6 +150,7 @@ service cloud.firestore {
       return data.categoryId is string && data.categoryId.size() >= 1 && data.categoryId.size() <= 128 &&
              data.title is string && data.title.size() >= 2 && data.title.size() <= 80 &&
              isOptString(data, 'shortDescription', 300) &&
+             isOptString(data, 'matchDetails', 4000) &&
              data.gameMode is string && data.gameMode.size() >= 2 && data.gameMode.size() <= 40 &&
              data.mapName is string && data.mapName.size() >= 2 && data.mapName.size() <= 40 &&
              data.entryFee is number && data.entryFee >= 0 &&
@@ -347,6 +349,24 @@ service cloud.firestore {
              data.enabled is bool &&
              isValidTimestamp(data.createdAt) &&
              isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidMapBanner(data) {
+      return data.mapName is string && data.mapName.size() >= 2 && data.mapName.size() <= 40 &&
+             data.bannerUrl is string && data.bannerUrl.size() <= 200000 &&
+             isOptString(data, 'presetKey', 64) &&
+             data.displayOrder is int && data.displayOrder >= 0 && data.displayOrder <= 10000 &&
+             data.enabled is bool &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidTournamentParticipant(data) {
+      return data.tournamentId is string && data.tournamentId.size() >= 1 && data.tournamentId.size() <= 128 &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.playerName is string && data.playerName.size() >= 1 && data.playerName.size() <= 40 &&
+             data.username is string && data.username.size() >= 2 && data.username.size() <= 32 &&
+             isValidTimestamp(data.createdAt);
     }
 
     function isValidAnnouncement(data) {
@@ -646,6 +666,23 @@ service cloud.firestore {
         allow create, update: if isAdmin() && isValidId(tournamentId) && isValidId(credId) && isValidRoomCredential(incoming());
         allow delete: if isAdmin() && isValidId(tournamentId) && isValidId(credId);
       }
+
+      match /participants/{participantUid} {
+        allow get, list: if isSignedIn();
+        allow create: if isSignedIn() &&
+                         isValidId(tournamentId) &&
+                         isValidId(participantUid) &&
+                         isValidTournamentParticipant(incoming()) && (
+                           isAdmin() || (
+                             participantUid == request.auth.uid &&
+                             incoming().userId == request.auth.uid &&
+                             incoming().tournamentId == tournamentId &&
+                             existsAfter(/databases/$(database)/documents/registrations/$(tournamentId + '_' + request.auth.uid)) &&
+                             getAfter(/databases/$(database)/documents/tournaments/$(tournamentId)).data.registeredCount > 0
+                           )
+                         );
+        allow update, delete: if isAdmin() && isValidId(tournamentId) && isValidId(participantUid);
+      }
     }
 
     match /registrations/{registrationId} {
@@ -810,6 +847,14 @@ service cloud.firestore {
       allow list: if isAdmin() || (isSignedIn() && resource.data.enabled == true);
       allow create, update: if isAdmin() && isValidId(bannerId) && isValidBanner(incoming());
       allow delete: if isAdmin() && isValidId(bannerId);
+    }
+
+    match /mapBanners/{mapId} {
+      allow get, list: if isSignedIn();
+      allow create: if isAdmin() && isValidId(mapId) && isValidMapBanner(incoming());
+      allow update: if isAdmin() && isValidId(mapId) && isValidMapBanner(incoming()) &&
+                       incoming().createdAt == existing().createdAt;
+      allow delete: if isAdmin() && isValidId(mapId);
     }
 
     match /announcements/{announcementId} {

@@ -57,6 +57,7 @@ data class CustomTournamentType(
     val displayName: String = "",
     val bannerUrl: String = "",
     val shortDescription: String = "",
+    val matchDetails: String = "",
     val gameMode: String = "",
     val mapName: String = "",
     val entryFee: Double = 0.0,
@@ -84,6 +85,7 @@ data class Tournament(
     val categoryId: String = "",
     val title: String = "",
     val shortDescription: String = "",
+    val matchDetails: String = "",
     val gameMode: String = "",
     val mapName: String = "",
     val entryFee: Double = 0.0,
@@ -131,6 +133,30 @@ data class Registration(
     val inGameUid: String = "",
     val entryFeePaid: Double = 0.0,
     val status: String = "CONFIRMED",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class TournamentParticipant(
+    @DocumentId val id: String = "",
+    val tournamentId: String = "",
+    val userId: String = "",
+    val playerName: String = "",
+    val username: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class MapBanner(
+    @DocumentId val id: String = "",
+    val mapName: String = "",
+    val bannerUrl: String = "",
+    val presetKey: String = "battle_royale",
+    val displayOrder: Long = 0L,
+    val enabled: Boolean = true,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )

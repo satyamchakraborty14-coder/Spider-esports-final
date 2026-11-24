@@ -538,3 +538,142 @@ test("Results 1-48: admin can write linked and manual position results; users ca
   await assertFails(adminDb.collection("results").doc("tour_coin_1_pos_48").delete().then(() => aliceDb.collection("results").doc("tour_coin_1_pos_1").delete()));
 });
 
+test("Match Details & Joined Members: atomic join writes participant entry and signed-in players can read list; spoofed participants rejected", async () => {
+  await seedUserAndTournament({ entryFee: 25, walletBalance: 100 });
+  const adminDb = dbForUser("admin_uid_1", "satyamchakraborty14@gmail.com");
+  const aliceDb = dbForUser(ALICE_UID, "alice@gmail.com");
+  const bobDb = dbForUser(BOB_UID, "bob@gmail.com");
+  const now = new Date(Date.now() - 1000);
+
+  // Admin can set rich matchDetails on tournament
+  await assertSucceeds(
+    adminDb.collection("tournaments").doc("tour_coin_1").update({
+      matchDetails: "Booyah pays 250 Coins! Room ID releases 10 mins prior. Squads must stay in assigned slots.",
+      updatedAt: now,
+    })
+  );
+
+  // Any signed-in player can list participants even when empty
+  await assertSucceeds(
+    bobDb.collection("tournaments").doc("tour_coin_1").collection("participants").get()
+  );
+
+  // Spoofed participant write without registration fails
+  await assertFails(
+    bobDb.collection("tournaments").doc("tour_coin_1").collection("participants").doc(BOB_UID).set({
+      tournamentId: "tour_coin_1",
+      userId: BOB_UID,
+      playerName: "FakeBob",
+      username: "BobFake",
+      createdAt: now,
+    })
+  );
+
+  // Alice atomically joins with wallet debit, tx, registration, slot increment, AND participant roster doc
+  await assertSucceeds(
+    aliceDb.runTransaction(async (tx) => {
+      const regRef = aliceDb.collection("registrations").doc(`tour_coin_1_${ALICE_UID}`);
+      const tourRef = aliceDb.collection("tournaments").doc("tour_coin_1");
+      const participantRef = tourRef.collection("participants").doc(ALICE_UID);
+      const walletRef = aliceDb.collection("wallets").doc(ALICE_UID);
+      const txRef = aliceDb.collection("transactions").doc(`tx_join_tour_coin_1_${ALICE_UID}`);
+
+      await tx.get(regRef);
+      const tSnap = await tx.get(tourRef);
+      const wSnap = await tx.get(walletRef);
+
+      tx.update(walletRef, {
+        totalBalance: wSnap.data().totalBalance - 25,
+        depositedBalance: wSnap.data().depositedBalance - 25,
+        updatedAt: now,
+      });
+      tx.set(txRef, {
+        userId: ALICE_UID,
+        type: "TOURNAMENT_ENTRY",
+        direction: "DEBIT",
+        description: "Joined Full Map Coin Clash (25 Coins)",
+        matchId: "tour_coin_1",
+        amount: 25,
+        status: "COMPLETED",
+        resultingBalance: 75,
+        createdAt: now,
+      });
+      tx.set(regRef, {
+        tournamentId: "tour_coin_1",
+        tournamentTitle: "Full Map Coin Clash",
+        categoryId: "cat_full_map",
+        userId: ALICE_UID,
+        username: "AlicePro",
+        inGameName: "AliceFF",
+        inGameUid: "1122334455",
+        entryFeePaid: 25,
+        status: "CONFIRMED",
+        createdAt: now,
+        updatedAt: now,
+      });
+      tx.set(participantRef, {
+        tournamentId: "tour_coin_1",
+        userId: ALICE_UID,
+        playerName: "AliceFF",
+        username: "AlicePro",
+        createdAt: now,
+      });
+      tx.update(tourRef, {
+        registeredCount: tSnap.data().registeredCount + 1,
+        updatedAt: now,
+      });
+    })
+  );
+
+  // Signed-in Bob can read joined members list
+  const snap = await assertSucceeds(
+    bobDb.collection("tournaments").doc("tour_coin_1").collection("participants").get()
+  );
+  if (snap.size !== 1 || snap.docs[0].data().playerName !== "AliceFF") {
+    throw new Error("Expected AliceFF in tournament participants subcollection");
+  }
+});
+
+test("Map Banners: admin can save/update/delete map banners; regular users can read/list only", async () => {
+  const adminDb = dbForUser("admin_uid_1", "satyamchakraborty14@gmail.com");
+  const aliceDb = dbForUser(ALICE_UID, "alice@gmail.com");
+  const now = new Date(Date.now() - 2000);
+
+  await assertSucceeds(
+    adminDb.collection("mapBanners").doc("map_bermuda").set({
+      mapName: "Bermuda",
+      bannerUrl: "https://example.com/bermuda.png",
+      presetKey: "battle_royale",
+      displayOrder: 1,
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
+  // Admin update preserving createdAt succeeds
+  await assertSucceeds(
+    adminDb.collection("mapBanners").doc("map_bermuda").update({
+      bannerUrl: "https://example.com/bermuda_v2.png",
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+
+  // Signed-in user can read/list mapBanners
+  await assertSucceeds(aliceDb.collection("mapBanners").get());
+
+  // Signed-in regular user cannot create or delete mapBanners
+  await assertFails(
+    aliceDb.collection("mapBanners").doc("map_kalahari").set({
+      mapName: "Kalahari",
+      bannerUrl: "https://example.com/kalahari.png",
+      presetKey: "battle_royale",
+      displayOrder: 2,
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+  await assertFails(aliceDb.collection("mapBanners").doc("map_bermuda").delete());
+});
+
